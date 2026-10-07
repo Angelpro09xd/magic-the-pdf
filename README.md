@@ -65,7 +65,9 @@ Las traducciones se guardan en caché en el servidor (`data/translations.json`).
 La app funciona **sin servidor**: se publica sola en GitHub Pages con el workflow `.github/workflows/pages.yml`.
 
 - **Dirección**: `https://angelpro09xd.github.io/magic-the-pdf/`
-- **Activarlo (una sola vez)**: en el repositorio, *Settings → Pages → Build and deployment → Source: **GitHub Actions***. Después cada push a la rama principal (o *Actions → Publicar en GitHub Pages → Run workflow*) publica la web.
+- **Activarlo (una sola vez)**, en *Settings → Pages → Build and deployment*, elige una de estas dos fuentes:
+  - **Deploy from a branch** → rama `claude/confident-heisenberg-1mo2uc`, carpeta **`/docs`**. La web ya construida (con las memorias de traducción) está en `docs/`; para actualizarla, ejecuta `npm run build:docs` y sube los cambios.
+  - **GitHub Actions** (automático): el workflow `.github/workflows/pages.yml` construye y publica en cada push y cada lunes. Necesita que GitHub Actions esté disponible en la cuenta.
 - El workflow pasa los tests, genera `dist/` con `npm run build:pages` y **precalcula las memorias de traducción de los 10 idiomas** (`memory/<idioma>.json`), así el traductor funciona al instante en el navegador. Cada lunes se vuelven a generar para incluir las cartas oficiales nuevas.
 - En la versión web todo se hace desde el navegador: Scryfall, imágenes, EDHREC, Commander Spellbook, Google Translate y MyMemory permiten peticiones directas. Los mazos y las traducciones se guardan en el navegador (localStorage e IndexedDB).
 - **Diferencia con el servidor**: la importación desde URL (Archidekt, Moxfield…) solo funciona con el servidor, porque esas webs no permiten peticiones desde otras páginas. En la versión web, exporta la lista y pégala como texto. Claude (opcional) también requiere el servidor.

@@ -9,7 +9,8 @@
     "dev": "node --watch server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "build:pages": "node scripts/build-pages.js",
-    "preview:pages": "node scripts/build-pages.js --no-memories && npx --yes serve dist"
+    "preview:pages": "node scripts/build-pages.js --no-memories && npx --yes serve dist",
+    "build:docs": "node scripts/build-pages.js --out docs"
   },
   "engines": {
     "node": ">=20"

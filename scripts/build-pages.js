@@ -4,7 +4,7 @@
  *  - precalcula las memorias de traducción de cada idioma (dist/memory/<idioma>.json)
  *    para que el traductor funcione en el navegador sin esperar.
  *
- * Uso: node scripts/build-pages.js [--no-memories] [--langs es,fr] [--memory-dir .memory-cache]
+ * Uso: node scripts/build-pages.js [--out dist] [--no-memories] [--langs es,fr] [--memory-dir .memory-cache]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,19 +14,19 @@ import { createMemoryStore } from '../server/lib/memoryStore.js';
 import { createThrottle } from '../server/lib/http.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dist = path.join(root, 'dist');
 const args = process.argv.slice(2);
 const opt = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : fallback;
 };
+const dist = path.resolve(root, opt('--out', 'dist'));
 
 fs.rmSync(dist, { recursive: true, force: true });
 fs.cpSync(path.join(root, 'public'), dist, { recursive: true });
 fs.mkdirSync(path.join(dist, 'vendor/jspdf'), { recursive: true });
 fs.copyFileSync(path.join(root, 'node_modules/jspdf/dist/jspdf.umd.min.js'), path.join(dist, 'vendor/jspdf/jspdf.umd.min.js'));
 fs.writeFileSync(path.join(dist, '.nojekyll'), '');
-console.log('Web estática copiada en dist/');
+console.log(`Web estática copiada en ${path.relative(root, dist)}/`);
 
 if (!args.includes('--no-memories')) {
   const langs = (opt('--langs', '') || LANGUAGES.map((l) => l.code).join(','))
