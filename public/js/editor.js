@@ -272,6 +272,8 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
       return;
     }
     infoNode.textContent = info.source === 'ocr' ? t('analysisOcr', { found: info.foundCount }) : t('analysisTemplate');
+    // Confianza baja (marcos antiguos, letras adornadas…): sugerir mover las cajas o elegir otra impresión.
+    if (info.source === 'ocr' && info.confidence != null && info.confidence < 0.6) infoNode.textContent += ` ${t('analysisLow')}`;
     for (const k of ['name', 'type', 'text']) {
       const input = body.querySelector(`[data-c="${k}"]`);
       input.value = toHex(draft.colors[faceIdx]?.[k] || info.colors[k]);
