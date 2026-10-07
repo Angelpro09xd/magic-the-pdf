@@ -188,8 +188,13 @@ function layout(ctx, tokens, maxWidth, size) {
   return { paragraphs, height, lineH, paraGap, symSize, widest };
 }
 
-function drawRules(ctx, text, box, { color = '#111', maxSize = 34, minSize = 14, center = false } = {}) {
+function drawRules(ctx, text, box, { color = '#111', maxSize = 34, minSize = 12, center = false, flavor = '' } = {}) {
   const tokens = tokenize(text);
+  if (flavor) {
+    // El texto de ambientación va en cursiva, en un párrafo aparte.
+    if (tokens.length) tokens.push({ type: 'newline' });
+    for (const tk of tokenize(flavor)) tokens.push(tk.type === 'newline' ? tk : { ...tk, italic: true });
+  }
   let size = maxSize;
   let lay = layout(ctx, tokens, box.w, size);
   while ((lay.height > box.h || lay.widest > box.w) && size > minSize) {
@@ -326,6 +331,8 @@ const FRAME_COLORS = {
   L: ['#c9b48d', '#8d7756'],
 };
 
+export const FRAME_KEYS = Object.keys(FRAME_COLORS);
+
 function frameKey(face, card) {
   const type = face.type_line || card.type_line || '';
   const colors = face.colors || card.colors || [];
@@ -335,16 +342,23 @@ function frameKey(face, card) {
   return 'A';
 }
 
-/** Marco propio: útil para marcos antiguos, arte completo, sagas, planeswalkers... */
-export async function renderCustom(artUrl, face, t, card = face) {
+/**
+ * Marco propio: útil para marcos antiguos, arte completo, sagas, planeswalkers y cartas personalizadas.
+ * face: datos de la cara (mana_cost, power…); t: textos a mostrar { name, type_line, oracle_text, flavor_text? }.
+ * opts: { art: { zoom, x, y }, frame: 'auto'|'W'|…, fontScale, artist, showFlavor }
+ */
+export async function renderCustom(artUrl, face, t, card = face, opts = {}) {
   await ensureFonts();
   await ensureSymbols(`${t.oracle_text} ${face.mana_cost}`);
   const W = CARD_W;
   const H = CARD_H;
   const c = newCanvas();
   const ctx = c.getContext('2d');
-  const [light, dark] = FRAME_COLORS[frameKey(face, card)];
-  const darkFrame = ['U', 'B', 'R', 'G'].includes(frameKey(face, card));
+  const key = opts.frame && opts.frame !== 'auto' ? opts.frame : frameKey(face, card);
+  const [light, dark] = FRAME_COLORS[key] || FRAME_COLORS.A;
+  const darkFrame = ['U', 'B', 'R', 'G'].includes(key);
+  const fontScale = Number(opts.fontScale) || 1;
+  const artT = { zoom: 1, x: 0, y: 0, ...(opts.art || {}) };
 
   ctx.fillStyle = '#111';
   roundRect(ctx, 0, 0, W, H, 34);
@@ -384,10 +398,19 @@ export async function renderCustom(artUrl, face, t, card = face) {
   if (artUrl) {
     try {
       const img = await loadImage(artUrl);
-      const scale = Math.max(art.w / img.width, art.h / img.height);
+      // Encuadre: zoom ≥ 1 y desplazamiento -1…1 dentro del margen sobrante.
+      const zoom = Math.max(1, Number(artT.zoom) || 1);
+      const scale = Math.max(art.w / img.width, art.h / img.height) * zoom;
       const sw = art.w / scale;
       const sh = art.h / scale;
-      ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, art.x, art.y, art.w, art.h);
+      const sx = ((img.width - sw) / 2) * (1 + Math.max(-1, Math.min(1, Number(artT.x) || 0)));
+      const sy = ((img.height - sh) / 2) * (1 + Math.max(-1, Math.min(1, Number(artT.y) || 0)));
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(art.x, art.y, art.w, art.h);
+      ctx.clip();
+      ctx.drawImage(img, sx, sy, sw, sh, art.x, art.y, art.w, art.h);
+      ctx.restore();
     } catch {
       // Sin arte: se queda el fondo oscuro
     }
@@ -414,8 +437,9 @@ export async function renderCustom(artUrl, face, t, card = face) {
   const stat =
     face.power != null ? `${face.power}/${face.toughness}` : face.loyalty != null ? face.loyalty : face.defense ?? null;
   drawRules(ctx, t.oracle_text, { x: box.x + 14, y: box.y + 10, w: box.w - 28, h: box.h - (stat != null ? 46 : 20) }, {
-    maxSize: 0.032 * H,
+    maxSize: 0.032 * H * fontScale,
     center: true,
+    flavor: opts.showFlavor === false ? '' : t.flavor_text || '',
   });
 
   // Fuerza/resistencia o lealtad
@@ -440,7 +464,11 @@ export async function renderCustom(artUrl, face, t, card = face) {
   ctx.fillStyle = '#ddd';
   ctx.font = `400 ${0.016 * H}px ${FONT_RULES}`;
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('Proxy · not for sale', inner.x, H - 0.022 * H);
+  const credit = opts.artist ?? face.artist ?? card.artist;
+  ctx.fillText(credit ? `Illus. ${credit}` : 'Proxy', inner.x, H - 0.022 * H);
+  ctx.textAlign = 'right';
+  ctx.fillText('Proxy · not for sale', inner.x + inner.w, H - 0.022 * H);
+  ctx.textAlign = 'left';
   return c;
 }
 

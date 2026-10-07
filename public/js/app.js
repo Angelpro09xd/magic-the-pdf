@@ -3,8 +3,11 @@ import * as sf from './scryfall.js';
 import {
   parseDeckText, exportDeckText, exportDeckCsv, validateDeck, deckStats, deckIdentity, countCards,
   canBeCommander, validPair, maxCopiesAllowed, mainType, cardRoles, printableFaces, textFaces,
-  edhrecSlug, encodeShare, decodeShare, shuffle, estimateBracket, CARD_TYPES,
+  edhrecSlug, encodeShare, decodeShare, shuffle, estimateBracket, CARD_TYPES, isBasicLand,
+  customCard, applyCustomFace,
 } from './deck.js';
+import { openEditor } from './editor.js';
+import { openArtPicker, pickByStyle } from './arts.js';
 import * as store from './storage.js';
 import { t, setUiLang, applyStaticTranslations } from './i18n.js';
 import { langStatus, officialPrint, displayName, prepareEntries, renderEntry, targetLang, faceKey } from './resolve.js';
@@ -94,19 +97,80 @@ const state = {
   pdfAbort: null,
 };
 
+// Historial para deshacer/rehacer (instantáneas del mazo actual).
+const history = { undo: [], redo: [], last: null, lastTime: 0 };
+const snapshot = () =>
+  JSON.stringify({
+    name: state.deck.name,
+    lang: state.deck.lang,
+    notes: state.deck.notes,
+    commanders: state.deck.commanders,
+    cards: state.deck.cards,
+  });
+
+function recordHistory() {
+  const now = snapshot();
+  if (now === history.last) return;
+  // Los cambios seguidos (p. ej. escribir notas) se agrupan en un solo paso.
+  if (history.last !== null && (Date.now() - history.lastTime > 800 || !history.undo.length)) {
+    history.undo.push(history.last);
+    if (history.undo.length > 60) history.undo.shift();
+  }
+  history.last = now;
+  history.lastTime = Date.now();
+  history.redo = [];
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  $('#undoBtn').disabled = !history.undo.length;
+  $('#redoBtn').disabled = !history.redo.length;
+}
+
+function restoreSnapshot(json) {
+  Object.assign(state.deck, JSON.parse(json));
+  history.last = json;
+  persistDecks();
+  renderAll();
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (!history.undo.length) return;
+  history.redo.push(history.last);
+  restoreSnapshot(history.undo.pop());
+  toast(t('undone'));
+}
+
+function redo() {
+  if (!history.redo.length) return;
+  history.undo.push(history.last);
+  restoreSnapshot(history.redo.pop());
+  toast(t('redone'));
+}
+
 let saveTimer = null;
-function saveDeck() {
-  state.deck.updatedAt = Date.now();
+function persistDecks() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     if (!store.saveDecks(state.decks)) toast(t('storageFull'), 'error');
   }, 300);
+}
+
+function saveDeck() {
+  state.deck.updatedAt = Date.now();
+  recordHistory();
+  persistDecks();
 }
 const saveSettingsNow = () => store.saveSettings(settings);
 
 function selectDeck(id) {
   state.deck = state.decks.find((d) => d.id === id) || state.decks[0];
   store.saveCurrentId(state.deck.id);
+  history.undo = [];
+  history.redo = [];
+  history.last = snapshot();
+  updateHistoryButtons();
   state.edhrec = null;
   state.combos = null;
   state.tokenEntries = [];
@@ -136,6 +200,7 @@ function bindHeader() {
     saveDeck();
     renderAll();
     toast(t('langChanged', { lang: getLanguage(langSel.value).name }));
+    warmTranslator(langSel.value);
   });
   $('#deckSelect').addEventListener('change', (e) => selectDeck(e.target.value));
   $('#newDeck').addEventListener('click', () => {
@@ -197,6 +262,18 @@ function applyTheme() {
   else document.documentElement.dataset.theme = settings.theme;
 }
 
+/** Pide al servidor que vaya preparando la memoria de traducción de ese idioma. */
+async function warmTranslator(lang) {
+  if (lang === 'en') return loadAiStatus();
+  try {
+    await api(`/api/memory/${lang}`, { method: 'POST' });
+  } catch {
+    // Sin servidor: se verá en la píldora de estado.
+  }
+  loadAiStatus();
+}
+
+let statusTimer = null;
 async function loadAiStatus() {
   try {
     state.ai = await api('/api/status');
@@ -204,6 +281,10 @@ async function loadAiStatus() {
     state.ai = { ai: false, offline: true };
   }
   renderAiStatus();
+  // Mientras se prepara la memoria de un idioma, consultamos el progreso.
+  const building = Object.values(state.ai.memories || {}).some((m) => m.building);
+  clearTimeout(statusTimer);
+  if (building) statusTimer = setTimeout(loadAiStatus, 2500);
 }
 
 function renderAiStatus() {
@@ -212,15 +293,20 @@ function renderAiStatus() {
   if (state.ai.offline) {
     pill.className = 'pill warn';
     pill.textContent = t('serverOffline');
-  } else if (state.ai.ai) {
-    pill.className = 'pill ok';
-    pill.textContent = t('aiOn');
-    pill.title = state.ai.model;
-  } else {
-    pill.className = 'pill warn';
-    pill.textContent = t('aiOff');
-    pill.title = t('aiOffHelp');
+    return;
   }
+  const mem = state.ai.memories?.[state.deck?.lang];
+  if (mem?.building) {
+    pill.className = 'pill warn';
+    pill.textContent = t('translatorLearning', { page: mem.page, pages: mem.pages });
+    pill.title = t('translatorLearningHelp');
+    return;
+  }
+  pill.className = 'pill ok';
+  pill.textContent = state.ai.ai ? t('aiOn') : t('translatorReady');
+  pill.title = mem?.cards
+    ? t('translatorMemory', { cards: mem.cards.toLocaleString(), templates: mem.templates.toLocaleString() })
+    : t('translatorHelp');
 }
 
 // ---------------------------------------------------------------- pestañas
@@ -545,6 +631,15 @@ function renderDeckList() {
         const card = officialPrint(e, deck) || e.card;
         const tile = cardTile(card, { actions: false, badge: e.qty > 1 ? `×${e.qty}` : '' });
         tile.onclick = () => openEntryModal(e);
+        // Las cartas editadas o traducidas se muestran tal como se imprimirán.
+        if (e.custom || (!officialPrint(e, deck) && e.translation?.lang === targetLang(e, deck))) {
+          renderEntry(e, deck, { ...settings.pdf, quality: 'large' })
+            .then(([canvas]) => {
+              if (!canvas) return;
+              tile.querySelector('img, .tile-text')?.replaceWith(canvas);
+            })
+            .catch(() => {});
+        }
         grid.append(tile);
       }
       section.append(grid);
@@ -570,21 +665,162 @@ function deckRow(e) {
     <div class="qty">
       ${isCmd ? '<span>👑</span>' : `<button class="btn icon" data-act="minus">−</button><span>${e.qty}</span><button class="btn icon" data-act="plus">＋</button>`}
     </div>
-    <div class="name" data-act="info">${esc(local)}${local !== c.name ? `<small>${esc(c.name)}</small>` : ''}${flags.length ? `<span class="flag">${esc(flags.join(' · '))}</span>` : ''}</div>
+    <div class="name" data-act="info">${esc(local)}${local !== c.name ? `<small>${esc(c.name)}</small>` : ''}${e.variants?.length ? `<small>🎨×${e.variants.length}</small>` : ''}${flags.length ? `<span class="flag">${esc(flags.join(' · '))}</span>` : ''}</div>
     ${manaHtml(c.mana_cost)}
     ${statusBadge(e)}
+    <div class="row-actions">
+      ${c.custom ? '' : `<button class="btn" data-act="art" title="${esc(t('chooseArt'))}">🎨</button>`}
+      <button class="btn" data-act="edit" title="${esc(t('openEditor'))}">✏️</button>
+    </div>
     <div class="price">${c.prices?.eur ? `€${c.prices.eur}` : c.prices?.usd ? `$${c.prices.usd}` : ''}</div>`;
   row.addEventListener('click', (ev) => {
     const act = ev.target.closest('[data-act]')?.dataset.act;
     if (act === 'minus') changeQty(e, -1);
     else if (act === 'plus') changeQty(e, 1);
     else if (act === 'info') openEntryModal(e);
+    else if (act === 'art') chooseArt(e);
+    else if (act === 'edit') editEntry(e);
   });
   const nameNode = $('.name', row);
   nameNode.addEventListener('mouseenter', (ev) => showHover(officialPrint(e, deck) || c, ev));
   nameNode.addEventListener('mousemove', moveHover);
   nameNode.addEventListener('mouseleave', hideHover);
   return row;
+}
+
+// ---------------------------------------------------------------- arte y editor
+
+/** Abre el selector de artes de una entrada (varios artes si es una básica con varias copias). */
+function chooseArt(entry) {
+  const multi = isBasicLand(entry.card) && entry.qty > 1;
+  openArtPicker({
+    card: entry.card,
+    deckLang: targetLang(entry, state.deck),
+    currentId: entry.card.id,
+    multi,
+    max: entry.qty,
+    selectedIds: (entry.variants || []).map((v) => v.id),
+    onPick: (picked) => {
+      if (multi) {
+        if (picked.length > 1) {
+          entry.variants = picked;
+          entry.card = picked[0];
+        } else {
+          delete entry.variants;
+          if (picked[0]) entry.card = picked[0];
+        }
+      } else {
+        setPrint(entry, picked);
+      }
+      saveDeck();
+      renderDeckPanels();
+      toast(t('artChanged'), 'ok');
+    },
+  });
+}
+
+/** Cambia la impresión de una entrada conservando traducción y edición. */
+function setPrint(entry, print) {
+  entry.card = print;
+  delete entry.localized;
+  delete entry.searched;
+  delete entry.overlayBase;
+  if (entry.custom) {
+    printableFaces(print).forEach((f, i) => {
+      const face = entry.custom.faces[i];
+      if (face) face.art = { ...(face.art || {}), url: f.image?.art_crop || print.image?.art_crop, zoom: 1, x: 0, y: 0 };
+    });
+  }
+}
+
+function editEntry(entry) {
+  openEditor({
+    entry,
+    deck: state.deck,
+    translateFn: translateApi,
+    toast,
+    onSave: ({ custom, overlayBase }) => {
+      entry.custom = custom;
+      if (overlayBase) entry.overlayBase = overlayBase;
+      if (entry.card.custom) applyCustomFace(entry.card, custom.faces[0]);
+      saveDeck();
+      renderDeckPanels();
+      toast(t('cardSaved'), 'ok');
+    },
+    onRemove: () => {
+      delete entry.custom;
+      saveDeck();
+      renderDeckPanels();
+    },
+  });
+}
+
+/** Crea una carta personalizada desde cero y abre el editor. */
+function newCustomCard() {
+  const face = {
+    name: t('customCardName'),
+    mana_cost: '{2}{G}',
+    type_line: t('customCardType'),
+    oracle_text: '',
+    flavor_text: '',
+    power: '2',
+    toughness: '2',
+    loyalty: '',
+    defense: '',
+    artist: '',
+    art: { url: '', zoom: 1, x: 0, y: 0 },
+  };
+  const card = customCard(face, state.deck.lang);
+  const entry = { ...store.newEntry(card, 1), custom: { style: 'custom', frame: 'auto', fontScale: 1, faces: [face] } };
+  openEditor({
+    entry,
+    deck: state.deck,
+    translateFn: translateApi,
+    toast,
+    onSave: ({ custom }) => {
+      entry.custom = custom;
+      applyCustomFace(card, custom.faces[0]);
+      state.deck.cards.push(entry);
+      saveDeck();
+      renderDeckPanels();
+      toast(t('added', { name: card.name }), 'ok');
+    },
+  });
+}
+
+/** Cambia el arte de todo el mazo según un estilo (salvo tierras básicas y cartas personalizadas). */
+async function applyBulkArt() {
+  const style = $('#bulkArtStyle').value;
+  const deck = state.deck;
+  const entries = allEntries().filter((e) => !e.card.custom && !isBasicLand(e.card));
+  if (!entries.length) return toast(t('emptyDeck'));
+  const progress = $('#bulkArtProgress');
+  const btn = $('#bulkArtApply');
+  btn.disabled = true;
+  try {
+    const langs = deck.lang === 'en' ? 'lang:en' : `(lang:${deck.lang} or lang:en)`;
+    const byOracle = await sf.printsForCards(
+      entries.map((e) => e.card),
+      langs,
+      (d, n) => setProgress(progress, d, n, `${t('searching')} ${d}/${n}`),
+    );
+    let changed = 0;
+    for (const e of entries) {
+      const p = pickByStyle(byOracle.get(e.card.oracle_id), style, targetLang(e, deck));
+      if (p && p.id !== e.card.id) {
+        setPrint(e, p);
+        changed++;
+      }
+    }
+    saveDeck();
+    renderDeckPanels();
+    toast(t('bulkArtDone', { n: changed }), 'ok');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    progress.classList.add('hidden');
+  }
 }
 
 function renderTokens() {
@@ -693,7 +929,11 @@ async function openCardModal(card, entry = findEntry(card)) {
           ${canBeCommander(card) || /Background/.test(card.type_line) ? `<button class="btn" data-act="cmd">👑 ${esc(t('setCommander'))}</button>` : ''}
           ${inDeck && deck.commanders.includes(entry) ? `<button class="btn" data-act="demote">${esc(t('moveToDeck'))}</button>` : ''}
           ${inDeck ? `<button class="btn danger" data-act="remove">${esc(t('remove'))}</button>` : ''}
-          ${inDeck ? `<button class="btn" data-act="edit">${esc(t('editTranslation'))}</button>` : ''}
+        </div>
+        <div class="row">
+          ${card.custom ? '' : `<button class="btn" data-act="art">🎨 ${esc(t('chooseArt'))}</button>`}
+          ${inDeck ? `<button class="btn" data-act="editor">✏️ ${esc(t('openEditor'))}</button>` : ''}
+          ${inDeck && !card.custom ? `<button class="btn" data-act="edit">📝 ${esc(t('editTranslation'))}</button>` : ''}
         </div>
         ${inDeck ? `<div class="row small">
             <label>${esc(t('cardLangOverride'))}
@@ -713,27 +953,25 @@ async function openCardModal(card, entry = findEntry(card)) {
           ${card.edhrec_rank ? `<dt>EDHREC</dt><dd>#${card.edhrec_rank}</dd>` : ''}
           <dt>${esc(t('roles'))}</dt><dd>${cardRoles(card).map((r) => esc(t(`role_${r}`))).join(', ') || '—'}</dd>
         </dl>
-        <div class="row small">
+        ${
+          card.custom
+            ? ''
+            : `<div class="row small">
           <a href="${esc(card.scryfall_uri)}" target="_blank" rel="noopener">Scryfall</a>
           ${card.related?.edhrec ? `<a href="${esc(card.related.edhrec)}" target="_blank" rel="noopener">EDHREC</a>` : ''}
           ${card.purchase?.cardmarket ? `<a href="${esc(card.purchase.cardmarket)}" target="_blank" rel="noopener">Cardmarket</a>` : ''}
           ${card.purchase?.tcgplayer ? `<a href="${esc(card.purchase.tcgplayer)}" target="_blank" rel="noopener">TCGplayer</a>` : ''}
         </div>
-        <h3>${esc(t('printsTitle'))}</h3>
-        <div class="row">
-          <select id="printsLang"><option value="any">${esc(t('allLanguages'))}</option>${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === deck.lang ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}</select>
-          <button class="btn" data-act="prints">${esc(t('showPrints'))}</button>
-        </div>
-        <div id="printsOut"></div>
         <h3>${esc(t('rulings'))}</h3>
         <button class="btn small" data-act="rulings">${esc(t('showRulings'))}</button>
-        <div id="rulingsOut"></div>
+        <div id="rulingsOut"></div>`
+        }
         <div id="modalEditor"></div>
       </div>
     </div>`;
 
-  // Vista previa de la carta traducida
-  if (entry && translation) {
+  // Vista previa de la carta traducida o editada, tal como se imprimirá
+  if (entry && (translation || entry.custom)) {
     renderEntry(entry, deck, settings.pdf)
       .then((canvases) => {
         const imgs = $('#modalImages');
@@ -772,8 +1010,16 @@ async function openCardModal(card, entry = findEntry(card)) {
       } catch (err) {
         out.textContent = err.message;
       }
-    } else if (act === 'prints') {
-      loadPrints(card, entry, $('#printsLang').value);
+    } else if (act === 'editor') {
+      modal.close();
+      editEntry(entry);
+    } else if (act === 'art') {
+      if (inDeck) {
+        modal.close();
+        chooseArt(entry);
+      } else {
+        openArtPicker({ card, deckLang: deck.lang, currentId: card.id, onPick: (p) => openCardModal(p) });
+      }
     }
   };
   body.onchange = (ev) => {
@@ -789,43 +1035,6 @@ async function openCardModal(card, entry = findEntry(card)) {
   if (!modal.open) modal.showModal();
 }
 
-async function loadPrints(card, entry, lang) {
-  const out = $('#printsOut');
-  out.innerHTML = '<span class="spinner"></span>';
-  try {
-    const list = await sf.prints(card.oracle_id, lang);
-    if (!list.length) {
-      out.innerHTML = `<p class="muted">${esc(t('noPrintsLang'))}</p>`;
-      return;
-    }
-    out.innerHTML = `<div class="prints-grid">${list
-      .map(
-        (p, i) => `<button data-i="${i}" class="${entry?.card.id === p.id ? 'selected' : ''}" title="${esc(p.set_name)} · ${esc(p.lang)}">
-          <img src="${esc(imageUrl(p, 'small'))}" alt="" loading="lazy"><span class="lbl">${esc(p.set.toUpperCase())} · ${esc(p.lang)}${p.prices.eur ? ` · €${p.prices.eur}` : ''}</span></button>`,
-      )
-      .join('')}</div>${entry ? `<p class="small muted">${esc(t('pickPrintHelp'))}</p>` : ''}`;
-    $$('.prints-grid button', out).forEach((btn) =>
-      btn.addEventListener('click', () => {
-        const p = list[Number(btn.dataset.i)];
-        if (!entry || !allEntries().includes(entry)) {
-          openCardModal(p);
-          return;
-        }
-        entry.card = p;
-        delete entry.localized;
-        delete entry.searched;
-        delete entry.overlayBase;
-        saveDeck();
-        renderDeckPanels();
-        toast(t('printChanged', { set: p.set_name, lang: p.lang }), 'ok');
-        openCardModal(p, entry);
-      }),
-    );
-  } catch (err) {
-    out.textContent = err.message;
-  }
-}
-
 // ---------------------------------------------------------------- idioma y traducción
 
 async function translateApi(lang, faces) {
@@ -838,7 +1047,9 @@ async function runPrepare({ translate = true, retranslateMachine = false } = {})
   const entries = allEntries();
   if (!entries.length) return toast(t('emptyDeck'));
   if (retranslateMachine) {
-    for (const e of entries) if (e.translation && ['machine', 'ai'].includes(e.translation.source)) delete e.translation;
+    for (const e of entries) {
+      if (e.translation && e.translation.source !== 'manual') delete e.translation;
+    }
   }
   const progress = $('#prepareProgress');
   const buttons = ['#prepareBtn', '#searchOnlyBtn', '#retranslateBtn'].map((s) => $(s));
@@ -879,7 +1090,7 @@ function renderLangTab() {
     list.innerHTML = `<div class="empty">${esc(t('emptyDeck'))}</div>`;
     return;
   }
-  const order = ['pending', 'missing', 'machine', 'ai', 'official-text', 'manual', 'official', 'original'];
+  const order = ['pending', 'missing', 'machine', 'auto', 'ai', 'memory', 'official-text', 'manual', 'custom', 'official', 'original'];
   const sorted = [...entries].sort(
     (a, b) => order.indexOf(langStatus(a, deck)) - order.indexOf(langStatus(b, deck)) || a.card.name.localeCompare(b.card.name),
   );
@@ -890,7 +1101,7 @@ function renderLangTab() {
     const shown = officialPrint(e, deck) || e.card;
     const lang = getLanguage(targetLang(e, deck));
     row.innerHTML = `
-      <img src="${esc(imageUrl(shown, 'small'))}" alt="" loading="lazy">
+      ${imageUrl(shown, 'small') ? `<img src="${esc(imageUrl(shown, 'small'))}" alt="" loading="lazy">` : '<span>✨</span>'}
       <div class="names">
         <div>${esc(displayName(e, deck))} ${e.lang ? `<span class="small">${lang.flag}</span>` : ''}</div>
         <div class="en">${esc(e.card.name)}</div>
@@ -899,13 +1110,15 @@ function renderLangTab() {
       ${statusBadge(e)}
       <div class="button-wrap">
         <button class="btn small" data-act="preview">${esc(t('preview'))}</button>
-        <button class="btn small" data-act="edit">${esc(t('edit'))}</button>
+        ${e.card.custom ? '' : `<button class="btn small" data-act="edit">📝 ${esc(t('quickEdit'))}</button>`}
+        <button class="btn small" data-act="editor">✏️ ${esc(t('openEditor'))}</button>
       </div>
       <div class="editor-slot" style="grid-column: 1 / -1"></div>`;
     row.addEventListener('click', async (ev) => {
       const act = ev.target.closest('[data-act]')?.dataset.act;
       const slot = $('.editor-slot', row);
       if (act === 'edit') openTranslationEditor(e, slot);
+      else if (act === 'editor') editEntry(e);
       else if (act === 'preview') {
         slot.innerHTML = '<span class="spinner"></span>';
         try {
@@ -1465,9 +1678,47 @@ function bindPdf() {
   });
   $('#generatePdf').addEventListener('click', generatePdf);
   $('#cancelPdf').addEventListener('click', () => state.pdfAbort?.abort());
+
+  // Selección de cartas a imprimir (usa entry.skipPrint)
+  $('.print-select').addEventListener('click', (e) => {
+    const sel = e.target.closest('[data-sel]')?.dataset.sel;
+    if (!sel) return;
+    const deck = state.deck;
+    for (const entry of deck.cards) {
+      const st = langStatus(entry, deck);
+      const keep =
+        sel === 'all' ||
+        (sel === 'translated' && !['official', 'original', 'pending'].includes(st)) ||
+        (sel === 'official' && st === 'official');
+      if (keep) delete entry.skipPrint;
+      else entry.skipPrint = true;
+    }
+    saveDeck();
+    renderPrintSelect();
+    renderPdfSummary();
+  });
+  $('#printSelectList').addEventListener('change', (e) => {
+    const entry = state.deck.cards.find((x) => x.uid === e.target.dataset.uid);
+    if (!entry) return;
+    if (e.target.checked) delete entry.skipPrint;
+    else entry.skipPrint = true;
+    saveDeck();
+    renderPdfSummary();
+  });
+}
+
+function renderPrintSelect() {
+  const deck = state.deck;
+  $('#printSelectList').innerHTML = [...deck.cards]
+    .sort((a, b) => displayName(a, deck).localeCompare(displayName(b, deck)))
+    .map(
+      (e) => `<label><input type="checkbox" data-uid="${e.uid}" ${e.skipPrint ? '' : 'checked'}> ${e.qty > 1 ? `${e.qty}× ` : ''}${esc(displayName(e, deck))} ${statusBadge(e)}</label>`,
+    )
+    .join('');
 }
 
 function renderPdfSummary() {
+  renderPrintSelect();
   const deck = state.deck;
   const items = entriesToPrint(deck, settings.pdf, settings.pdf.includeTokens ? state.tokenEntries : []);
   const cards = items.reduce((n, i) => n + i.qty * (settings.pdf.dfcDuplex ? 1 : Math.max(1, printableFaces(officialPrint(i.entry, deck) || i.entry.card).length)), 0);
@@ -1517,6 +1768,8 @@ async function generatePdf() {
       commander: t('commanderGroup'),
       cards: t('cards'),
       composing: t('composing'),
+      calibrationTitle: t('calibrationTitle'),
+      calibrationHelp: t('calibrationHelp'),
       types: Object.fromEntries([...CARD_TYPES, 'Other', 'Token', 'Commander'].map((k) => [k, k === 'Commander' ? t('commanderGroup') : t(`type_${k}`)])),
     };
     const blob = await buildPdf(deck, items, settings.pdf, {
@@ -1557,9 +1810,27 @@ function bindMisc() {
   $('#mulligan').addEventListener('click', mulligan);
   $('#drawCard').addEventListener('click', drawCard);
   $('#loadCombos').addEventListener('click', loadCombos);
-  $('#cardModal').addEventListener('click', (e) => {
-    if (e.target.id === 'cardModal') e.target.close();
+  for (const id of ['#cardModal', '#editorModal', '#artModal']) {
+    $(id).addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) e.currentTarget.close();
+    });
+  }
+  $('#undoBtn').addEventListener('click', undo);
+  $('#redoBtn').addEventListener('click', redo);
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || document.querySelector('dialog[open]')) return;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    const key = e.key.toLowerCase();
+    if (key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    }
   });
+  $('#newCustomCard').addEventListener('click', newCustomCard);
+  $('#bulkArtApply').addEventListener('click', applyBulkArt);
 }
 
 function init() {
@@ -1575,7 +1846,7 @@ function init() {
   bindPdf();
   bindMisc();
   selectDeck(store.loadCurrentId());
-  loadAiStatus();
+  warmTranslator(state.deck.lang);
   handleShareHash();
   window.addEventListener('hashchange', handleShareHash);
 }

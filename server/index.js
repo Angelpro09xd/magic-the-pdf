@@ -6,6 +6,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Cache } from './lib/cache.js';
 import { createThrottle, fetchBinary, fetchJson, HttpError } from './lib/http.js';
 import { createTranslator } from './lib/translate.js';
+import { createMemoryStore } from './lib/memoryStore.js';
+import { createMachineTranslator } from './lib/machine.js';
 import { importDeckFromUrl } from './lib/importers.js';
 import { getLanguage } from '../public/js/languages.js';
 
@@ -15,7 +17,7 @@ const DAY = 24 * 60 * 60 * 1000;
 
 const IMAGE_HOSTS = new Set(['cards.scryfall.io', 'svgs.scryfall.io', 'c1.scryfall.com', 'gatherer.wizards.com']);
 
-export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir } = {}) {
+export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, memories, machine, warmup = [] } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '2mb' }));
@@ -24,7 +26,17 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir } 
   const translationCache = new Cache({ file: cacheDir && path.join(cacheDir, 'translations.json'), maxEntries: 50000 });
   const apiCache = new Cache({ ttlMs: DAY, maxEntries: 2000 });
   const imageCache = new Cache({ ttlMs: DAY, maxEntries: 400 });
-  const translator = createTranslator({ anthropic, model, effort, cache: translationCache, scryfall, mymemoryEmail });
+  const memoryStore = memories || createMemoryStore({ dir: cacheDir, scryfall });
+  const translator = createTranslator({
+    anthropic,
+    model,
+    effort,
+    cache: translationCache,
+    memories: memoryStore,
+    machine: machine || createMachineTranslator({ email: mymemoryEmail }),
+  });
+  // Precarga la memoria de los idiomas más usados para que la primera traducción sea rápida.
+  for (const lang of warmup) memoryStore.get(lang).catch(() => {});
 
   const cached = async (key, fn) => {
     const hit = apiCache.get(key);
@@ -46,7 +58,23 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir } 
 
   app.get(
     '/api/status',
-    route(() => ({ ai: translator.hasAI, model: translator.hasAI ? model : null })),
+    route(async () => ({
+      ai: translator.hasAI,
+      model: translator.hasAI ? model : null,
+      translator: 'memory+machine',
+      memories: await memoryStore.info(),
+    })),
+  );
+
+  // Empieza a preparar (en segundo plano) la memoria de traducción de un idioma.
+  app.post(
+    '/api/memory/:lang',
+    route(async (req) => {
+      const lang = String(req.params.lang);
+      if (!getLanguage(lang)) throw new HttpError(400, 'Idioma no soportado');
+      memoryStore.get(lang).catch(() => {});
+      return { memories: await memoryStore.info() };
+    }),
   );
 
   // Proxy de imágenes: permite usar las imágenes en <canvas> y en el PDF sin problemas de CORS.
@@ -154,6 +182,7 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir } 
         mana_cost: String(c.mana_cost || '').slice(0, 100),
         type_line: String(c.type_line || '').slice(0, 200),
         oracle_text: String(c.oracle_text || '').slice(0, 2000),
+        flavor_text: String(c.flavor_text || '').slice(0, 1000),
       }));
       if (clean.some((c) => !c.key)) throw new HttpError(400, 'Cada carta necesita una clave');
       return { translations: await translator.translate(lang, clean) };
@@ -180,14 +209,15 @@ if (isMain) {
     effort: process.env.ANTHROPIC_EFFORT || 'low',
     mymemoryEmail: process.env.MYMEMORY_EMAIL || '',
     cacheDir: path.join(root, 'data'),
+    warmup: (process.env.MEMORY_WARMUP ?? 'es').split(',').map((l) => l.trim()).filter(Boolean),
   });
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, () => {
     console.log(`Magic the PDF escuchando en http://localhost:${port}`);
     console.log(
       anthropic
-        ? `Traducción por IA activada (${model}).`
-        : 'Sin ANTHROPIC_API_KEY: se usarán traducciones oficiales y MyMemory como respaldo.',
+        ? `Traductor: Claude (${model}) + motor propio de respaldo.`
+        : 'Traductor: motor propio (memoria de cartas oficiales + traducción automática gratuita).',
     );
   });
 }

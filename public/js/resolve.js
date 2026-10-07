@@ -9,9 +9,13 @@ import { renderCustom, renderOfficial, renderOverlay } from './render.js';
 
 export const targetLang = (entry, deck) => entry.lang || deck.lang || 'en';
 
-/** Estado de idioma de una entrada: official | ai | official-text | machine | manual | missing | pending. */
+/**
+ * Estado de idioma de una entrada:
+ * custom | official | memory | auto | machine | ai | manual | missing | pending | original.
+ */
 export function langStatus(entry, deck) {
   const lang = targetLang(entry, deck);
+  if (entry.custom || entry.card?.custom) return 'custom';
   if (entry.renderMode === 'original') return 'original';
   if (entry.card?.lang === lang) return 'official';
   if (entry.localized?.lang === lang) return 'official';
@@ -33,6 +37,7 @@ export function officialPrint(entry, deck) {
 
 /** Nombre mostrado en el idioma del mazo. */
 export function displayName(entry, deck) {
+  if (entry.custom) return entry.custom.faces.map((f) => f.name).join(' // ');
   const off = officialPrint(entry, deck);
   if (off) return off.printed_name || off.faces?.map((f) => f.printed_name || f.name).join(' // ') || off.name;
   const lang = targetLang(entry, deck);
@@ -141,6 +146,7 @@ function imageOf(face, quality) {
  */
 export async function renderEntry(entry, deck, settings = {}) {
   const quality = settings.quality || 'png';
+  if (entry.custom) return renderCustomEntry(entry, quality);
   const off = officialPrint(entry, deck);
   const lang = targetLang(entry, deck);
   const translated = !off && entry.translation?.lang === lang && entry.renderMode !== 'original';
@@ -173,7 +179,61 @@ export async function renderEntry(entry, deck, settings = {}) {
       const t = tFaces[i] || tFaces[0];
       if (mode === 'overlay' && baseFaces?.[i]) return renderOverlay(imageOf(baseFaces[i], quality), ef, t);
       const art = imageFaces[i]?.image?.art_crop || card.image?.art_crop;
-      return renderCustom(art, ef, t, card);
+      return renderCustom(art, ef, t, card, { showFlavor: false });
     }),
   );
+}
+
+/** Impresión inglesa con marco moderno sobre la que se puede superponer texto (o null). */
+export function overlayBaseFor(entry) {
+  const card = entry.card;
+  // Cualquier impresión con marco moderno sirve (en otro idioma el texto también queda tapado).
+  if (!card.custom && overlayFriendly(card)) return card;
+  return entry.overlayBase || null;
+}
+
+/**
+ * Carta editada en el editor (entry.custom):
+ * { style: 'custom'|'overlay', frame, fontScale, faces: [{ name, mana_cost, type_line, oracle_text,
+ *   flavor_text, power, toughness, loyalty, defense, artist, art: { url, zoom, x, y } }] }
+ */
+export async function renderCustomEntry(entry, quality = 'png') {
+  const custom = entry.custom;
+  const card = entry.card;
+  const base = custom.style === 'overlay' ? overlayBaseFor(entry) : null;
+  const baseFaces = base ? printableFaces(base) : null;
+  const imageFaces = printableFaces(card);
+  // Una sola imagen física aunque haya varias caras de texto (split, aventura): se fusionan.
+  const faces =
+    custom.faces.length > 1 && imageFaces.length === 1 && !card.custom
+      ? [
+          {
+            ...custom.faces[0],
+            name: custom.faces.map((f) => f.name).join(' // '),
+            type_line: custom.faces.map((f) => f.type_line).join(' // '),
+            oracle_text: custom.faces.map((f) => `${f.name}: ${f.oracle_text}`).join('\n'),
+            flavor_text: '',
+          },
+        ]
+      : custom.faces;
+  return Promise.all(
+    faces.map((f, i) => {
+      if (base && baseFaces?.[i]) return renderOverlay(imageOf(baseFaces[i], quality), f, f);
+      const art = f.art?.url || imageFaces[i]?.image?.art_crop || card.image?.art_crop || null;
+      return renderCustom(art, f, f, card, {
+        art: f.art,
+        frame: custom.frame,
+        fontScale: custom.fontScale,
+        artist: f.artist,
+      });
+    }),
+  );
+}
+
+/** Para cartas con varios artes (p. ej. tierras básicas): la entrada a usar en la copia n. */
+export function variantFor(entry, n) {
+  const list = entry.variants;
+  if (!list?.length) return entry;
+  const card = list[n % list.length];
+  return { uid: `${entry.uid}-v${card.id}`, qty: 1, card, lang: entry.lang };
 }

@@ -2,7 +2,7 @@
  * Generación del PDF de proxies con jsPDF (cargado como UMD en window.jspdf).
  */
 import { isBasicLand, mainType } from './deck.js';
-import { displayName, renderEntry } from './resolve.js';
+import { displayName, renderEntry, variantFor } from './resolve.js';
 import { renderBack, stampProxy } from './render.js';
 
 export const PAPERS = {
@@ -24,6 +24,7 @@ export const DEFAULT_PDF_SETTINGS = {
   backImage: null,
   dfcDuplex: false,
   deckList: true,
+  calibration: false,
   watermark: false,
   quality: 'png',
   translatedMode: 'overlay',
@@ -64,19 +65,28 @@ export async function buildPdf(deck, entries, settings, { onProgress = () => {},
   const backCanvas = s.backs ? await renderBack({ image: s.backImage, title: deck.commanders[0]?.card?.name?.split(',')[0] || 'Commander' }) : null;
   const backData = backCanvas ? toJpeg(backCanvas) : null;
 
-  for (const { entry, qty } of entries) {
-    if (signal?.aborted) throw new DOMException('Cancelado', 'AbortError');
-    onProgress({ done, total, label: displayName(entry, deck) });
+  const rendered = new Map(); // uid → imágenes (cada carta distinta se dibuja una sola vez)
+  const imagesFor = async (e) => {
+    if (rendered.has(e.uid)) return rendered.get(e.uid);
     let canvases;
     try {
-      canvases = await renderEntry(entry, deck, s);
+      canvases = await renderEntry(e, deck, s);
     } catch (err) {
-      console.warn('No se pudo renderizar', entry.card?.name, err);
+      console.warn('No se pudo renderizar', e.card?.name, err);
       canvases = [];
     }
     if (s.watermark) canvases.forEach((c) => stampProxy(c));
-    const images = canvases.map((c, i) => ({ data: toJpeg(c), alias: `${entry.uid}-${i}` }));
+    const images = canvases.map((c, i) => ({ data: toJpeg(c), alias: `${e.uid}-${i}` }));
+    rendered.set(e.uid, images);
+    return images;
+  };
+
+  for (const { entry, qty } of entries) {
+    if (signal?.aborted) throw new DOMException('Cancelado', 'AbortError');
+    onProgress({ done, total, label: displayName(entry, deck) });
     for (let n = 0; n < qty; n++) {
+      // Varios artes (p. ej. tierras básicas): cada copia usa el siguiente.
+      const images = await imagesFor(variantFor(entry, n));
       if (!images.length) continue;
       if (s.dfcDuplex && images.length > 1) {
         slots.push({ front: images[0], back: images[1] });
@@ -88,9 +98,16 @@ export async function buildPdf(deck, entries, settings, { onProgress = () => {},
   }
   onProgress({ done: total, total, label: strings.composing || '…' });
 
+  let firstPageUsed = false;
+  if (s.calibration) {
+    drawCalibration(doc, paper, strings);
+    firstPageUsed = true;
+  }
   if (s.deckList) {
+    if (firstPageUsed) doc.addPage([paper.w, paper.h]);
     const listCanvas = renderDeckList(deck, entries, paper, strings);
     doc.addImage(listCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, paper.w, paper.h);
+    firstPageUsed = true;
   }
 
   const needBackPages = s.backs || (s.dfcDuplex && slots.some((sl) => sl.back));
@@ -107,7 +124,7 @@ export async function buildPdf(deck, entries, settings, { onProgress = () => {},
 
   for (let p = 0; p < slots.length; p += perPage) {
     const pageSlots = slots.slice(p, p + perPage);
-    if (s.deckList || p > 0) doc.addPage([paper.w, paper.h]);
+    if (firstPageUsed || p > 0) doc.addPage([paper.w, paper.h]);
     pageSlots.forEach((slot, i) => {
       const { x, y } = pos(i);
       if (bleed > 0) {
@@ -162,6 +179,34 @@ function drawCutMarks(doc, count, { cols, rows, cw, ch, gap, bleed, left, top, p
     doc.line(Math.max(0, left - bleed - len - 1), y, left - bleed - 1, y);
     doc.line(gridRight + bleed + 1, y, Math.min(paper.w, gridRight + bleed + len + 1), y);
   }
+}
+
+/** Página para comprobar que la impresora no escala: un rectángulo de carta y una regla. */
+function drawCalibration(doc, paper, strings) {
+  const x = (paper.w - CARD_MM.w) / 2;
+  const y = 40;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
+  doc.rect(x, y, CARD_MM.w, CARD_MM.h);
+  doc.setFontSize(11);
+  doc.text('63 x 88 mm', paper.w / 2, y + CARD_MM.h / 2, { align: 'center' });
+  doc.setFontSize(14);
+  doc.text(strings.calibrationTitle || 'Calibration', paper.w / 2, 20, { align: 'center' });
+  doc.setFontSize(10);
+  doc.text(strings.calibrationHelp || 'Measure the rectangle: it must be 63 x 88 mm.', paper.w / 2, 28, {
+    align: 'center',
+    maxWidth: paper.w - 30,
+  });
+  // Regla de 100 mm
+  const rx = (paper.w - 100) / 2;
+  const ry = y + CARD_MM.h + 25;
+  doc.line(rx, ry, rx + 100, ry);
+  for (let mm = 0; mm <= 100; mm++) {
+    const h = mm % 10 === 0 ? 5 : mm % 5 === 0 ? 3.5 : 2;
+    doc.line(rx + mm, ry, rx + mm, ry - h);
+    if (mm % 10 === 0) doc.text(String(mm / 10), rx + mm, ry + 5, { align: 'center' });
+  }
+  doc.text('cm', rx + 106, ry + 1);
 }
 
 /** Página con la lista del mazo, dibujada en canvas para soportar cualquier alfabeto. */

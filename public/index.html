@@ -25,6 +25,8 @@
       <button id="renameDeck" class="btn" data-i18n-title="renameDeck">✎</button>
       <button id="duplicateDeck" class="btn" data-i18n-title="duplicateDeck">⧉</button>
       <button id="deleteDeck" class="btn danger" data-i18n-title="deleteDeck">🗑</button>
+      <button id="undoBtn" class="btn" data-i18n-title="undo" disabled>↶</button>
+      <button id="redoBtn" class="btn" data-i18n-title="redo" disabled>↷</button>
     </div>
     <label class="lang-picker">
       <span data-i18n="cardLanguage">Idioma de las cartas</span>
@@ -94,7 +96,10 @@
             <label class="check"><input type="checkbox" id="fInLang"> <span data-i18n="filterInLang">Existe en el idioma del mazo</span></label>
           </div>
           <div class="search-actions">
-            <button type="button" id="randomCommander" class="btn" data-i18n="randomCommander">🎲 Comandante aleatorio</button>
+            <span class="button-wrap">
+              <button type="button" id="randomCommander" class="btn" data-i18n="randomCommander">🎲 Comandante aleatorio</button>
+              <button type="button" id="newCustomCard" class="btn" data-i18n="newCustomCard">✨ Crear carta personalizada</button>
+            </span>
             <a href="https://scryfall.com/docs/syntax" target="_blank" rel="noopener" class="muted small" data-i18n="syntaxHelp">Sintaxis avanzada de Scryfall</a>
           </div>
         </form>
@@ -180,6 +185,21 @@
           </label>
           <input id="deckFilter" type="search" data-i18n-placeholder="filterDeck">
         </div>
+        <details class="bulk-arts">
+          <summary data-i18n="bulkArtsTitle">🎨 Artes de todo el mazo</summary>
+          <p class="muted small" data-i18n="bulkArtsHelp">Cambia la edición de todas las cartas (salvo las básicas) de una vez. Siempre puedes cambiar una carta concreta con 🎨.</p>
+          <div class="row">
+            <select id="bulkArtStyle">
+              <option value="newest" data-i18n="bulkNewest">Las más recientes</option>
+              <option value="oldest" data-i18n="bulkOldest">Las originales (primera edición)</option>
+              <option value="cheapest" data-i18n="bulkCheapest">Las más baratas</option>
+              <option value="fancy" data-i18n="bulkFancy">Especiales (sin borde, showcase…)</option>
+              <option value="modern" data-i18n="bulkModern">Marco moderno (mejor para traducir)</option>
+            </select>
+            <button id="bulkArtApply" class="btn" data-i18n="apply">Aplicar</button>
+          </div>
+          <div id="bulkArtProgress" class="progress hidden"><div class="bar"></div><span class="label"></span></div>
+        </details>
         <div id="validation" class="validation"></div>
         <div id="deckList"></div>
         <div id="tokensList"></div>
@@ -232,6 +252,7 @@
           <fieldset>
             <legend data-i18n="pdfContent">Contenido</legend>
             <label class="check"><input name="deckList" type="checkbox"> <span data-i18n="deckListPage">Página con la lista del mazo</span></label>
+            <label class="check"><input name="calibration" type="checkbox"> <span data-i18n="calibrationPage">Página de calibración (regla)</span></label>
             <label class="check"><input name="includeCommanders" type="checkbox"> <span data-i18n="includeCommanders">Incluir comandante(s)</span></label>
             <label class="check"><input name="skipBasics" type="checkbox"> <span data-i18n="skipBasics">Omitir tierras básicas</span></label>
             <label class="check"><input name="includeTokens" type="checkbox"> <span data-i18n="includeTokens">Incluir fichas y emblemas</span></label>
@@ -261,6 +282,16 @@
             <label class="check"><input name="autoTranslate" type="checkbox"> <span data-i18n="autoTranslate">Traducir automáticamente lo que falte al generar</span></label>
           </fieldset>
         </form>
+        <details class="print-select">
+          <summary data-i18n="printSelection">Elegir qué cartas imprimir</summary>
+          <div class="row">
+            <button type="button" class="btn small" data-sel="all" data-i18n="selAll">Todas</button>
+            <button type="button" class="btn small" data-sel="none" data-i18n="selNone">Ninguna</button>
+            <button type="button" class="btn small" data-sel="translated" data-i18n="selTranslated">Solo traducidas/editadas</button>
+            <button type="button" class="btn small" data-sel="official" data-i18n="selOfficial">Solo oficiales</button>
+          </div>
+          <div id="printSelectList" class="print-select-list"></div>
+        </details>
         <p id="pdfSummary" class="muted"></p>
         <div class="row">
           <button id="generatePdf" class="btn primary big" data-i18n="generatePdf">📄 Generar PDF</button>
@@ -276,6 +307,16 @@
   <dialog id="cardModal" class="modal">
     <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
     <div id="cardModalBody"></div>
+  </dialog>
+
+  <dialog id="editorModal" class="modal wide">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="editorModalBody"></div>
+  </dialog>
+
+  <dialog id="artModal" class="modal wide">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="artModalBody"></div>
   </dialog>
 
   <div id="hoverPreview" class="hover-preview hidden"></div>

@@ -147,7 +147,12 @@ async function searchAll(query, order = 'released') {
 }
 
 const isGoodPrint = (c) =>
-  c.image_status !== 'missing' && c.image_status !== 'placeholder' && !c.digital && (c.image_uris || c.card_faces?.[0]?.image_uris);
+  c.image_status !== 'missing' &&
+  c.image_status !== 'placeholder' &&
+  !c.digital &&
+  !['art_series', 'double_faced_token'].includes(c.layout) &&
+  !c.oversized &&
+  (c.image_uris || c.card_faces?.[0]?.image_uris);
 
 /**
  * Busca, para cada carta, una impresión oficial en el idioma indicado.
@@ -172,6 +177,41 @@ export async function findPrintsInLanguage(cards, lang, onProgress) {
     onProgress?.(++done, queries.length);
   }
   return result;
+}
+
+/**
+ * Todas las impresiones de varias cartas a la vez (para cambiar el arte de todo el mazo).
+ * Devuelve Map<oracle_id, slimCard[]> ordenadas de más nueva a más antigua.
+ */
+export async function printsForCards(cards, extra = '', onProgress) {
+  const result = new Map();
+  const names = [...new Set(cards.map((c) => c.name))];
+  const queries = nameQueries(names, `game:paper ${extra}`.trim());
+  let done = 0;
+  for (const query of queries) {
+    for (const raw of await searchAll(query)) {
+      if (!isGoodPrint(raw)) continue;
+      const slim = slimCard(raw);
+      if (!result.has(slim.oracle_id)) result.set(slim.oracle_id, []);
+      result.get(slim.oracle_id).push(slim);
+    }
+    onProgress?.(++done, queries.length);
+  }
+  return result;
+}
+
+/** Etiquetas de estilo de una impresión (para filtrar artes). */
+export function printStyle(card) {
+  const tags = [];
+  if (card.border_color === 'borderless') tags.push('borderless');
+  if (card.frame_effects?.includes('showcase')) tags.push('showcase');
+  if (card.frame_effects?.includes('extendedart')) tags.push('extended');
+  if (card.full_art) tags.push('fullart');
+  if (card.frame === '1993' || card.frame === '1997') tags.push('retro');
+  if (card.frame_effects?.includes('etched')) tags.push('etched');
+  if (card.promo) tags.push('promo');
+  if (!tags.length) tags.push('normal');
+  return tags;
 }
 
 /** Marco moderno (2015) sin arte completo: el que mejor admite superponer texto traducido. */

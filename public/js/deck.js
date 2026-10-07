@@ -131,6 +131,9 @@ export function slimCard(c) {
     loyalty: f.loyalty ?? null,
     defense: f.defense ?? null,
     colors: f.colors || null,
+    flavor_text: f.flavor_text || '',
+    artist: f.artist || null,
+    illustration_id: f.illustration_id || null,
     image: pickImages(f.image_uris),
   }));
   const tokens = (c.all_parts || [])
@@ -167,6 +170,11 @@ export function slimCard(c) {
     frame_effects: c.frame_effects || [],
     full_art: Boolean(c.full_art),
     border_color: c.border_color,
+    flavor_text: c.flavor_text || '',
+    artist: c.artist || null,
+    illustration_id: c.illustration_id || c.card_faces?.[0]?.illustration_id || null,
+    promo: Boolean(c.promo),
+    image_status: c.image_status || null,
     legal: c.legalities?.commander || 'legal',
     game_changer: Boolean(c.game_changer),
     prices: { usd: c.prices?.usd ?? null, eur: c.prices?.eur ?? null },
@@ -333,9 +341,25 @@ export function cardRoles(card) {
 
 export const CARD_TYPES = ['Creature', 'Planeswalker', 'Battle', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Land'];
 
+// Tipos en otros idiomas (para cartas personalizadas escritas, por ejemplo, en español).
+const TYPE_ALIASES = {
+  Creature: /Criatura|Créature|Kreatur|Creatura/i,
+  Planeswalker: /Planeswalker/i,
+  Battle: /Batalla|Bataille|Schlacht|Battaglia/i,
+  Instant: /Instantáneo|Éphémère|Spontanzauber|Istantaneo|Mágica Instantânea/i,
+  Sorcery: /Conjuro|Rituel|Hexerei|Stregoneria|Feitiço/i,
+  Artifact: /Artefacto|Artefact|Artefakt|Artefatto|Artefato/i,
+  Enchantment: /Encantamiento|Enchantement|Verzauberung|Incantesimo|Encantamento/i,
+  Land: /Tierra|Terrain|Land|Terra/i,
+};
+
 export function mainType(card) {
   const type = frontType(card);
-  return CARD_TYPES.find((t) => type.includes(t)) || 'Other';
+  return (
+    CARD_TYPES.find((t) => type.includes(t)) ||
+    (card?.custom && CARD_TYPES.find((t) => TYPE_ALIASES[t].test(type))) ||
+    'Other'
+  );
 }
 
 export function deckStats(deck) {
@@ -434,4 +458,68 @@ export function shuffle(list, random = Math.random) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+/** Valor de maná de un coste ("{2}{G}{G}" → 4; X = 0; {2/W} = 2). */
+export function manaValue(cost) {
+  let total = 0;
+  for (const [, sym] of String(cost || '').matchAll(/\{([^}]+)\}/g)) {
+    if (/^\d+$/.test(sym)) total += Number(sym);
+    else if (/^[XYZ]$/.test(sym)) continue;
+    else if (/^2\//.test(sym)) total += 2;
+    else total += 1;
+  }
+  return total;
+}
+
+/** Colores que aparecen en un texto con símbolos de maná. */
+export function manaColors(text) {
+  const symbols = String(text || '').match(/\{[^}]+\}/g) || [];
+  return ['W', 'U', 'B', 'R', 'G'].filter((c) => symbols.some((s) => s.includes(c)));
+}
+
+/** Carta personalizada (sin equivalente en Scryfall). */
+export function customCard(face, lang = 'en') {
+  const id = `custom-${crypto.randomUUID()}`;
+  return applyCustomFace(
+    {
+      id,
+      oracle_id: id,
+      custom: true,
+      lang,
+      keywords: [],
+      produced_mana: [],
+      layout: 'normal',
+      set: 'custom',
+      set_name: 'Personalizada',
+      collector_number: '1',
+      rarity: 'special',
+      legal: 'legal',
+      game_changer: false,
+      prices: { usd: null, eur: null },
+      image: null,
+      faces: [],
+      tokens: [],
+      purchase: {},
+      related: {},
+    },
+    face,
+  );
+}
+
+/** Copia los datos editados de la cara principal a la carta (para validación y estadísticas). */
+export function applyCustomFace(card, face) {
+  return Object.assign(card, {
+    name: face.name || card.name || 'Carta personalizada',
+    mana_cost: face.mana_cost || '',
+    cmc: manaValue(face.mana_cost),
+    type_line: face.type_line || '',
+    oracle_text: face.oracle_text || '',
+    flavor_text: face.flavor_text || '',
+    colors: manaColors(face.mana_cost),
+    color_identity: manaColors(`${face.mana_cost} ${face.oracle_text}`),
+    power: face.power || null,
+    toughness: face.toughness || null,
+    loyalty: face.loyalty || null,
+  });
 }
