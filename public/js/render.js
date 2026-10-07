@@ -9,8 +9,20 @@ import { symbology } from './scryfall.js';
 export const CARD_W = 745;
 export const CARD_H = 1040;
 
-const FONT_TITLE = '"Alegreya Sans SC", "Alegreya Sans", "Trebuchet MS", sans-serif';
-const FONT_RULES = '"Crimson Pro", "Georgia", serif';
+// Fuentes parecidas a las de Magic: Vollkorn ≈ Beleren (nombres y tipos), Crimson Text ≈ MPlantin (reglas).
+// Se pueden cambiar (o usar las oficiales si el usuario las sube) con setCardFonts().
+export const DEFAULT_FONTS = { title: 'Vollkorn', rules: 'Crimson Text' };
+let FONT_TITLE = `"${DEFAULT_FONTS.title}", Georgia, serif`;
+let FONT_RULES = `"${DEFAULT_FONTS.rules}", Georgia, serif`;
+
+export function setCardFonts({ title, rules } = {}) {
+  if (title) FONT_TITLE = `"${title}", Georgia, serif`;
+  if (rules) FONT_RULES = `"${rules}", Georgia, serif`;
+  fontsReady = null;
+}
+
+export const titleFont = () => FONT_TITLE;
+export const rulesFont = () => FONT_RULES;
 
 const imageCache = new Map();
 
@@ -37,7 +49,7 @@ export function loadImage(url) {
 }
 
 let fontsReady = null;
-function ensureFonts() {
+export function ensureFonts() {
   fontsReady ??= Promise.all([
     document.fonts.load(`700 40px ${FONT_TITLE}`),
     document.fonts.load(`400 30px ${FONT_RULES}`),
@@ -46,7 +58,7 @@ function ensureFonts() {
   return fontsReady;
 }
 
-function newCanvas(w = CARD_W, h = CARD_H) {
+export function newCanvas(w = CARD_W, h = CARD_H) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -57,7 +69,7 @@ function newCanvas(w = CARD_W, h = CARD_H) {
 
 const symbolImages = new Map();
 
-async function ensureSymbols(text) {
+export async function ensureSymbols(text) {
   const needed = [...new Set((text || '').match(/\{[^}]+\}/g) || [])].filter((s) => !symbolImages.has(s));
   if (!needed.length) return;
   const map = await symbology();
@@ -75,7 +87,7 @@ async function ensureSymbols(text) {
 
 const SYMBOL_COLORS = { W: '#f8f3d0', U: '#a9d6f0', B: '#c9c2bf', R: '#f5a585', G: '#9bd3ae', C: '#d6d0cc' };
 
-function drawSymbol(ctx, sym, x, y, size) {
+export function drawSymbol(ctx, sym, x, y, size) {
   const img = symbolImages.get(sym);
   if (img) {
     ctx.drawImage(img, x, y, size, size);
@@ -191,7 +203,13 @@ function layout(ctx, tokens, maxWidth, size) {
   return { paragraphs, height, lineH, paraGap, symSize, widest };
 }
 
-function drawRules(ctx, text, box, { color = '#111', maxSize = 34, minSize = 12, center = false, flavor = '' } = {}) {
+/**
+ * Dibuja texto de reglas con símbolos, ajustando el tamaño para que quepa en la caja.
+ * opts: { color, maxSize, minSize, center (centra si es una sola línea), align: 'left'|'center',
+ *         valign: 'middle'|'top', flavor, lineHeight }
+ */
+export function drawRules(ctx, text, box, opts = {}) {
+  const { color = '#111', maxSize = 34, minSize = 10, center = false, flavor = '', align = 'left', valign = 'middle' } = opts;
   const tokens = tokenize(text);
   if (flavor) {
     // El texto de ambientación va en cursiva, en un párrafo aparte.
@@ -201,16 +219,16 @@ function drawRules(ctx, text, box, { color = '#111', maxSize = 34, minSize = 12,
   let size = maxSize;
   let lay = layout(ctx, tokens, box.w, size);
   while ((lay.height > box.h || lay.widest > box.w) && size > minSize) {
-    size -= 1;
+    size -= 0.5;
     lay = layout(ctx, tokens, box.w, size);
   }
-  let y = box.y + Math.max(0, (box.h - lay.height) / 2);
+  let y = box.y + (valign === 'top' ? 0 : Math.max(0, (box.h - lay.height) / 2));
   const shortText = lay.paragraphs.length === 1 && lay.paragraphs[0].length === 1 && center;
   ctx.fillStyle = color;
   ctx.textBaseline = 'alphabetic';
   for (const para of lay.paragraphs) {
     for (const ln of para) {
-      const offsetX = shortText ? (box.w - ln.width) / 2 : 0;
+      const offsetX = shortText || align === 'center' ? (box.w - ln.width) / 2 : 0;
       const baseline = y + size * 0.86;
       for (const it of ln.items) {
         if (it.type === 'symbol') {
@@ -224,9 +242,10 @@ function drawRules(ctx, text, box, { color = '#111', maxSize = 34, minSize = 12,
     }
     y += lay.paraGap;
   }
+  return size;
 }
 
-function fitText(ctx, text, maxWidth, maxSize, weight = 700, family = FONT_TITLE) {
+export function fitText(ctx, text, maxWidth, maxSize, weight = 700, family = FONT_TITLE) {
   let size = maxSize;
   do {
     ctx.font = `${weight} ${size}px ${family}`;

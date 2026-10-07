@@ -8,8 +8,10 @@ import { LANGUAGES, getLanguage } from './languages.js';
 import * as sf from './scryfall.js';
 import { t } from './i18n.js';
 import { printableFaces, textFaces } from './deck.js';
-import { renderCustomEntry, overlayBaseFor, officialPrint, targetLang, faceKey } from './resolve.js';
-import { FRAME_KEYS } from './render.js';
+import { renderCustomEntry, overlayBaseFor, officialPrint, targetLang, faceKey, faceImage, originalFace } from './resolve.js';
+import { FRAME_KEYS, CARD_W, CARD_H } from './render.js';
+import { forgetAnalysis } from './original.js';
+import { TITLE_FONTS, RULES_FONTS, CUSTOM_TITLE, CUSTOM_RULES, currentFonts, chooseFonts, uploadFont } from './fonts.js';
 import { openArtPicker } from './arts.js';
 
 const esc = (s) =>
@@ -86,8 +88,13 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
   const card = entry.card;
   const draft = entry.custom
     ? structuredClone(entry.custom)
-    : { style: 'custom', frame: 'auto', fontScale: 1, faces: initialFaces(entry, deck) };
-  let overlayBase = overlayBaseFor(entry);
+    : { style: card.custom ? 'custom' : 'overlay', frame: 'auto', fontScale: 1, titleScale: 1, faces: initialFaces(entry, deck) };
+  draft.layouts ??= [];
+  draft.colors ??= [];
+  draft.titleScale ??= 1;
+  if (draft.style === 'overlay' && card.custom) draft.style = 'custom';
+  let overlayBase = draft.basePrint || overlayBaseFor(entry);
+  let showZones = true;
   let faceIdx = 0;
   let lastField = null;
   const off = officialPrint(entry, deck);
@@ -128,7 +135,54 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
           ${card.custom ? `<div class="row"><select data-k="tlang">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === targetLang(entry, deck) ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}</select><button type="button" class="btn" data-a="translate">🌐 ${esc(t('translateCustom'))}</button></div>` : ''}
         </fieldset>
         <fieldset>
+          <legend>${esc(t('edStyle'))}</legend>
+          <label>${esc(t('cardStyle'))}
+            <select data-d="style">
+              ${card.custom ? '' : `<option value="overlay">${esc(t('modeOriginal'))}</option>`}
+              <option value="custom">${esc(t('modeCustom'))}</option>
+            </select>
+          </label>
+          <div class="only-overlay">
+            <p class="small muted">${esc(t('originalHelp'))}</p>
+            <div class="row">
+              <label class="check"><input type="checkbox" data-o="zones" checked> ${esc(t('showZones'))}</label>
+              <button type="button" class="btn small" data-a="resetZones">${esc(t('resetZones'))}</button>
+              <button type="button" class="btn small" data-a="reanalyze">🔍 ${esc(t('reanalyze'))}</button>
+            </div>
+            <div class="color-row">
+              <label>${esc(t('colorName'))} <input type="color" data-c="name"></label>
+              <label>${esc(t('colorType'))} <input type="color" data-c="type"></label>
+              <label>${esc(t('colorText'))} <input type="color" data-c="text"></label>
+              <button type="button" class="btn small" data-a="autoColors">${esc(t('autoColors'))}</button>
+            </div>
+            <label>${esc(t('titleSize'))} <input type="range" min="0.6" max="1.4" step="0.02" data-d="titleScale"></label>
+          </div>
+          <div class="only-custom">
+            <label>${esc(t('frameColor'))}
+              <select data-d="frame">
+                <option value="auto">${esc(t('frameAuto'))}</option>
+                ${FRAME_KEYS.map((k) => `<option value="${k}">${esc(t(`frame_${k}`))}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          <label>${esc(t('fontSize'))} <input type="range" min="0.6" max="1.4" step="0.02" data-d="fontScale"></label>
+          <div class="font-row">
+            <label>${esc(t('titleFont'))}
+              <select data-f="title">${[...TITLE_FONTS, CUSTOM_TITLE].map((f) => `<option value="${esc(f)}">${esc(f === CUSTOM_TITLE ? t('ownFont') : f)}</option>`).join('')}</select>
+            </label>
+            <label class="btn small">⬆ ${esc(t('uploadFont'))}<input type="file" accept=".ttf,.otf,.woff,.woff2" data-upload="title" hidden></label>
+          </div>
+          <div class="font-row">
+            <label>${esc(t('rulesFont'))}
+              <select data-f="rules">${[...RULES_FONTS, CUSTOM_RULES].map((f) => `<option value="${esc(f)}">${esc(f === CUSTOM_RULES ? t('ownFont') : f)}</option>`).join('')}</select>
+            </label>
+            <label class="btn small">⬆ ${esc(t('uploadFont'))}<input type="file" accept=".ttf,.otf,.woff,.woff2" data-upload="rules" hidden></label>
+          </div>
+          <p class="small muted">${esc(t('fontsHelp'))}</p>
+        </fieldset>
+        <fieldset>
           <legend>${esc(t('edArt'))}</legend>
+          <p class="small muted only-overlay">${esc(t('artOverlayHelp'))}</p>
           <div class="row">
             ${card.custom ? '' : `<button type="button" class="btn" data-a="pickArt">🎨 ${esc(t('artFromPrints'))}</button>`}
             <input type="search" data-k="artSearch" placeholder="${esc(t('artFromOtherCard'))}">
@@ -139,30 +193,20 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
             <label class="btn">📁 ${esc(t('uploadImage'))}<input type="file" accept="image/*" data-k="upload" hidden></label>
             <input type="url" data-k="artUrl" placeholder="https://…">
           </div>
-          <label>${esc(t('artZoom'))} <input type="range" min="1" max="3" step="0.05" data-art="zoom"></label>
-          <label>${esc(t('artX'))} <input type="range" min="-1" max="1" step="0.02" data-art="x"></label>
-          <label>${esc(t('artY'))} <input type="range" min="-1" max="1" step="0.02" data-art="y"></label>
-          <button type="button" class="btn small" data-a="resetArt">${esc(t('resetFraming'))}</button>
-        </fieldset>
-        <fieldset>
-          <legend>${esc(t('edStyle'))}</legend>
-          <label>${esc(t('cardStyle'))}
-            <select data-d="style">
-              <option value="custom">${esc(t('modeCustom'))}</option>
-              ${card.custom ? '' : `<option value="overlay">${esc(t('modeOverlay'))}</option>`}
-            </select>
-          </label>
-          <label>${esc(t('frameColor'))}
-            <select data-d="frame">
-              <option value="auto">${esc(t('frameAuto'))}</option>
-              ${FRAME_KEYS.map((k) => `<option value="${k}">${esc(t(`frame_${k}`))}</option>`).join('')}
-            </select>
-          </label>
-          <label>${esc(t('fontSize'))} <input type="range" min="0.7" max="1.3" step="0.05" data-d="fontScale"></label>
+          <div class="only-custom">
+            <label>${esc(t('artZoom'))} <input type="range" min="1" max="3" step="0.05" data-art="zoom"></label>
+            <label>${esc(t('artX'))} <input type="range" min="-1" max="1" step="0.02" data-art="x"></label>
+            <label>${esc(t('artY'))} <input type="range" min="-1" max="1" step="0.02" data-art="y"></label>
+            <button type="button" class="btn small" data-a="resetArt">${esc(t('resetFraming'))}</button>
+          </div>
         </fieldset>
       </div>
       <div class="editor-preview">
         <div class="preview-canvases"><span class="spinner"></span></div>
+        <div class="row">
+          <button type="button" class="btn small only-overlay" data-a="compare">👁 ${esc(t('holdOriginal'))}</button>
+          <span class="small muted analysis-info"></span>
+        </div>
         <p class="small muted">${esc(t('editorPreviewHelp'))}</p>
       </div>
     </div>
@@ -183,27 +227,116 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
     body.querySelector('[data-d="style"]').value = draft.style;
     body.querySelector('[data-d="frame"]').value = draft.frame || 'auto';
     body.querySelector('[data-d="fontScale"]').value = draft.fontScale || 1;
-    body.querySelectorAll('[data-face]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.face) === faceIdx));
+    body.querySelector('[data-d="titleScale"]').value = draft.titleScale || 1;
+    const fonts = currentFonts();
+    body.querySelector('[data-f="title"]').value = fonts.title;
+    body.querySelector('[data-f="rules"]').value = fonts.rules;
+    body.querySelectorAll('.face-tabs [data-face]').forEach((b) => b.classList.toggle('primary', Number(b.dataset.face) === faceIdx));
+    body.classList.toggle('style-overlay', draft.style === 'overlay');
+    body.classList.toggle('style-custom', draft.style !== 'overlay');
   }
 
   let timer = null;
   let renderToken = 0;
   let lastCanvases = [];
-  function schedulePreview() {
+  function schedulePreview(delay = 200) {
     clearTimeout(timer);
     timer = setTimeout(async () => {
       const token = ++renderToken;
       const slot = body.querySelector('.preview-canvases');
       try {
-        const canvases = await renderCustomEntry({ card, custom: draft, overlayBase }, 'large');
+        const canvases = await renderCustomEntry({ card, custom: draft, overlayBase }, 'png');
         if (token !== renderToken) return;
         lastCanvases = canvases;
         slot.innerHTML = '';
-        slot.append(...canvases);
+        canvases.forEach((c, i) => {
+          const stage = document.createElement('div');
+          stage.className = 'preview-stage';
+          stage.dataset.face = i;
+          stage.append(c);
+          slot.append(stage);
+        });
+        afterRender();
       } catch (err) {
         slot.textContent = err.message;
       }
-    }, 200);
+    }, delay);
+  }
+
+  /** Tras dibujar: colores medidos, información del análisis y cajas de las zonas. */
+  function afterRender() {
+    const info = lastCanvases[faceIdx]?.mtpInfo;
+    const infoNode = body.querySelector('.analysis-info');
+    if (draft.style !== 'overlay' || !info) {
+      infoNode.textContent = '';
+      return;
+    }
+    infoNode.textContent = info.source === 'ocr' ? t('analysisOcr', { found: info.foundCount }) : t('analysisTemplate');
+    for (const k of ['name', 'type', 'text']) {
+      const input = body.querySelector(`[data-c="${k}"]`);
+      input.value = toHex(draft.colors[faceIdx]?.[k] || info.colors[k]);
+    }
+    drawZones(info.zones);
+  }
+
+  const toHex = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : '#111111');
+
+  /** Cajas arrastrables para mover/redimensionar las zonas de texto. */
+  function drawZones(zones) {
+    const stage = body.querySelector(`.preview-stage[data-face="${faceIdx}"]`);
+    if (!stage) return;
+    stage.querySelectorAll('.zone').forEach((z) => z.remove());
+    if (!showZones) return;
+    for (const k of ['name', 'type', 'text']) {
+      const r = draft.layouts[faceIdx]?.[k] || zones[k];
+      if (!r) continue;
+      const z = document.createElement('div');
+      z.className = `zone zone-${k}`;
+      z.dataset.zone = k;
+      Object.assign(z.style, {
+        left: `${(r.x / CARD_W) * 100}%`,
+        top: `${(r.y / CARD_H) * 100}%`,
+        width: `${(r.w / CARD_W) * 100}%`,
+        height: `${(r.h / CARD_H) * 100}%`,
+      });
+      z.innerHTML = `<span class="zone-label">${esc(t(`zone_${k}`))}</span><span class="zone-handle"></span>`;
+      stage.append(z);
+      enableDrag(z, stage, k, r);
+    }
+  }
+
+  function enableDrag(z, stage, key, start) {
+    z.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      const resizing = ev.target.classList.contains('zone-handle');
+      const box = stage.getBoundingClientRect();
+      const scale = CARD_W / box.width;
+      const r0 = { ...(draft.layouts[faceIdx]?.[key] || start) };
+      const x0 = ev.clientX;
+      const y0 = ev.clientY;
+      z.setPointerCapture(ev.pointerId);
+      const move = (e) => {
+        const dx = (e.clientX - x0) * scale;
+        const dy = (e.clientY - y0) * scale;
+        const r = resizing
+          ? { ...r0, w: Math.max(20, r0.w + dx), h: Math.max(12, r0.h + dy) }
+          : { ...r0, x: r0.x + dx, y: r0.y + dy };
+        draft.layouts[faceIdx] = { ...(draft.layouts[faceIdx] || {}), [key]: r };
+        Object.assign(z.style, {
+          left: `${(r.x / CARD_W) * 100}%`,
+          top: `${(r.y / CARD_H) * 100}%`,
+          width: `${(r.w / CARD_W) * 100}%`,
+          height: `${(r.h / CARD_H) * 100}%`,
+        });
+      };
+      const up = () => {
+        z.removeEventListener('pointermove', move);
+        z.removeEventListener('pointerup', up);
+        schedulePreview(50);
+      };
+      z.addEventListener('pointermove', move);
+      z.addEventListener('pointerup', up);
+    });
   }
 
   async function ensureOverlayBase() {
@@ -220,7 +353,11 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
 
   function setArt(url) {
     face().art = { ...(face().art || {}), url, zoom: 1, x: 0, y: 0 };
-    if (draft.style === 'overlay') draft.style = 'custom';
+    if (draft.style === 'overlay') {
+      // Con otra imagen ya no hay "carta original" debajo: se pasa al marco propio.
+      draft.style = 'custom';
+      toast(t('switchedToCustom'));
+    }
     fillForm();
     schedulePreview();
   }
@@ -244,8 +381,11 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
     } else if (el.dataset.art) {
       face().art = { ...(face().art || {}), [el.dataset.art]: Number(el.value) };
       schedulePreview();
-    } else if (el.dataset.d === 'fontScale') {
-      draft.fontScale = Number(el.value);
+    } else if (el.dataset.d === 'fontScale' || el.dataset.d === 'titleScale') {
+      draft[el.dataset.d] = Number(el.value);
+      schedulePreview();
+    } else if (el.dataset.c) {
+      draft.colors[faceIdx] = { ...(draft.colors[faceIdx] || {}), [el.dataset.c]: el.value };
       schedulePreview();
     }
   };
@@ -258,7 +398,24 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
         return;
       }
       draft.style = el.value;
+      fillForm();
     } else if (el.dataset.d === 'frame') draft.frame = el.value;
+    else if (el.dataset.o === 'zones') {
+      showZones = el.checked;
+      afterRender();
+      return;
+    } else if (el.dataset.f) {
+      chooseFonts({ [el.dataset.f]: el.value });
+    } else if (el.dataset.upload && el.files[0]) {
+      try {
+        await uploadFont(el.dataset.upload, el.files[0]);
+        toast(t('fontUploaded'), 'ok');
+        fillForm();
+      } catch {
+        toast(t('fontError'), 'error');
+      }
+      el.value = '';
+    }
     else if (el.dataset.k === 'artUrl' && el.value.trim()) setArt(el.value.trim());
     else if (el.dataset.k === 'upload' && el.files[0]) {
       try {
@@ -279,10 +436,11 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
   body.onclick = async (e) => {
     const symBtn = e.target.closest('[data-sym]');
     if (symBtn) return insertSymbol(symBtn.dataset.sym);
-    const faceBtn = e.target.closest('[data-face]');
+    const faceBtn = e.target.closest('.face-tabs [data-face]');
     if (faceBtn) {
       faceIdx = Number(faceBtn.dataset.face);
       fillForm();
+      afterRender();
       return;
     }
     const artBtn = e.target.closest('[data-art-url]');
@@ -291,8 +449,21 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
     if (!a) return;
     if (a === 'cancel') modal.close();
     else if (a === 'save') {
-      onSave({ custom: draft, overlayBase });
+      onSave({ custom: draft, overlayBase: draft.basePrint ? null : overlayBase });
       modal.close();
+    } else if (a === 'resetZones') {
+      draft.layouts[faceIdx] = undefined;
+      schedulePreview(0);
+    } else if (a === 'autoColors') {
+      draft.colors[faceIdx] = undefined;
+      schedulePreview(0);
+    } else if (a === 'reanalyze') {
+      const base = overlayBase;
+      if (!base) return;
+      await forgetAnalysis(faceImage(base, faceIdx, 'png'), originalFace(base, faceIdx).name);
+      draft.layouts[faceIdx] = undefined;
+      body.querySelector('.analysis-info').innerHTML = `<span class="spinner"></span> ${esc(t('analyzing'))}`;
+      schedulePreview(0);
     } else if (a === 'remove') {
       onRemove();
       modal.close();
@@ -359,6 +530,15 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
         card,
         deckLang: 'any',
         onPick: (p) => {
+          if (draft.style === 'overlay') {
+            // "Como la original" sobre otra edición: se reanaliza esa impresión.
+            draft.basePrint = p;
+            overlayBase = p;
+            draft.layouts = [];
+            draft.colors = [];
+            schedulePreview(0);
+            return;
+          }
           const pf = printableFaces(p);
           setArt(pf[faceIdx]?.image?.art_crop || p.image?.art_crop || pf[0]?.image?.art_crop);
           if (!face().artist || face().artist === card.artist) face().artist = pf[faceIdx]?.artist || p.artist || '';
@@ -391,7 +571,31 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
     }
   };
 
+  // Mantener pulsado "Ver original" muestra la carta sin cambios.
+  const compareBtn = body.querySelector('[data-a="compare"]');
+  const showOriginal = (on) => {
+    const stage = body.querySelector(`.preview-stage[data-face="${faceIdx}"]`);
+    if (!stage || !overlayBase) return;
+    let img = stage.querySelector('img.original-peek');
+    if (on && !img) {
+      img = document.createElement('img');
+      img.className = 'original-peek';
+      img.src = faceImage(overlayBase, faceIdx, 'large');
+      stage.append(img);
+    } else if (!on && img) img.remove();
+  };
+  compareBtn?.addEventListener('pointerdown', () => showOriginal(true));
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) compareBtn?.addEventListener(ev, () => showOriginal(false));
+
+  modal.onkeydown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      body.querySelector('[data-a="save"]').click();
+    }
+  };
+
   fillForm();
-  schedulePreview();
+  body.querySelector('.analysis-info').innerHTML = draft.style === 'overlay' ? `<span class="spinner"></span> ${esc(t('analyzing'))}` : '';
+  schedulePreview(0);
   if (!modal.open) modal.showModal();
 }

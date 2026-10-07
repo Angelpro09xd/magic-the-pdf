@@ -6,6 +6,7 @@
 import { findOverlayBases, findPrintsInLanguage, overlayFriendly } from './scryfall.js';
 import { printableFaces, textFaces } from './deck.js';
 import { renderCustom, renderOfficial, renderOverlay } from './render.js';
+import { analyzeCard, renderOriginalStyle } from './original.js';
 
 export const targetLang = (entry, deck) => entry.lang || deck.lang || 'en';
 
@@ -84,7 +85,7 @@ export async function prepareEntries(entries, deck, { translateFn, onProgress = 
     if (!missing.length) continue;
 
     // 2) Base inglesa con marco moderno para superponer la traducción
-    const needBase = missing.filter((e) => !overlayFriendly(e.card) && !e.overlayBase);
+    const needBase = missing.filter((e) => e.card.lang !== 'en' && !e.overlayBase);
     if (needBase.length) {
       onProgress({ phase: 'bases', lang, done: 0, total: needBase.length });
       try {
@@ -108,6 +109,8 @@ export async function prepareEntries(entries, deck, { translateFn, onProgress = 
           mana_cost: f.mana_cost,
           type_line: f.type_line,
           oracle_text: f.oracle_text,
+          // El texto de ambientación solo está en inglés en las impresiones inglesas.
+          flavor_text: e.card.lang === 'en' ? f.flavor_text || '' : '',
         }),
       );
     }
@@ -129,7 +132,7 @@ export async function prepareEntries(entries, deck, { translateFn, onProgress = 
       e.translation = {
         lang,
         source,
-        faces: tf.map((r) => ({ name: r.name, type_line: r.type_line, oracle_text: r.oracle_text })),
+        faces: tf.map((r) => ({ name: r.name, type_line: r.type_line, oracle_text: r.oracle_text, flavor_text: r.flavor_text || '' })),
       };
       delete e.translationError;
     }
@@ -160,7 +163,7 @@ export async function renderEntry(entry, deck, settings = {}) {
   const tFaces = entry.translation.faces;
   const englishFaces = textFaces(card);
   const mode = entry.renderMode && entry.renderMode !== 'auto' ? entry.renderMode : settings.translatedMode || 'overlay';
-  const base = overlayFriendly(card) && card.lang === 'en' ? card : entry.overlayBase;
+  const base = overlayBaseFor(entry);
   const imageFaces = printableFaces(card);
 
   // Cartas con varias caras de texto pero una sola imagen (split, aventura...): una única carta propia.
@@ -177,30 +180,60 @@ export async function renderEntry(entry, deck, settings = {}) {
   return Promise.all(
     englishFaces.map((ef, i) => {
       const t = tFaces[i] || tFaces[0];
-      if (mode === 'overlay' && baseFaces?.[i]) return renderOverlay(imageOf(baseFaces[i], quality), ef, t);
+      if (mode === 'overlay' && baseFaces?.[i]) return renderOriginalFace(base, i, t, quality, { ocr: settings.ocr });
       const art = imageFaces[i]?.image?.art_crop || card.image?.art_crop;
       return renderCustom(art, ef, t, card, { showFlavor: false });
     }),
   );
 }
 
-/** Impresión inglesa con marco moderno sobre la que se puede superponer texto (o null). */
+/** Datos (en inglés) de la cara i de una impresión, con su tipo de marco, para el análisis. */
+export function originalFace(card, i = 0) {
+  const f = textFaces(card)[i] || card;
+  return { ...f, frame: card.frame, layout: card.layout, mana_cost: f.mana_cost ?? card.mana_cost };
+}
+
+/** Imagen de la cara i de una impresión. */
+export function faceImage(card, i = 0, quality = 'png') {
+  const f = printableFaces(card)[i];
+  return f ? imageOf(f, quality) : null;
+}
+
+/**
+ * Dibuja la cara i de `base` "como la original" con los textos t (análisis con OCR y borrado
+ * del texto original). Si algo falla, recurre al método simple de superponer cajas.
+ */
+export async function renderOriginalFace(base, i, t, quality = 'png', opts = {}) {
+  const url = faceImage(base, i, quality);
+  const face = originalFace(base, i);
+  try {
+    const analysis = await analyzeCard(url, face, { useOcr: opts.ocr !== false });
+    return await renderOriginalStyle(url, face, t, analysis, opts);
+  } catch (err) {
+    console.warn('Render "como la original" falló, uso el simple:', err);
+    return renderOverlay(url, face, t);
+  }
+}
+
+/** Impresión sobre la que se reescribe el texto: la propia carta si está en inglés (cualquier marco). */
 export function overlayBaseFor(entry) {
   const card = entry.card;
-  // Cualquier impresión con marco moderno sirve (en otro idioma el texto también queda tapado).
-  if (!card.custom && overlayFriendly(card)) return card;
-  return entry.overlayBase || null;
+  if (card.custom) return null;
+  if (card.lang === 'en') return card;
+  return entry.overlayBase || card;
 }
 
 /**
  * Carta editada en el editor (entry.custom):
- * { style: 'custom'|'overlay', frame, fontScale, faces: [{ name, mana_cost, type_line, oracle_text,
- *   flavor_text, power, toughness, loyalty, defense, artist, art: { url, zoom, x, y } }] }
+ * { style: 'overlay' (como la original) | 'custom' (marco propio), frame, fontScale, titleScale,
+ *   layouts: [{ name, type, text }] (zonas movidas a mano), colors: [{ name, type, text }],
+ *   faces: [{ name, mana_cost, type_line, oracle_text, flavor_text, power, toughness, loyalty,
+ *   defense, artist, art: { url, zoom, x, y } }] }
  */
 export async function renderCustomEntry(entry, quality = 'png') {
   const custom = entry.custom;
   const card = entry.card;
-  const base = custom.style === 'overlay' ? overlayBaseFor(entry) : null;
+  const base = custom.style === 'overlay' ? custom.basePrint || overlayBaseFor(entry) : null;
   const baseFaces = base ? printableFaces(base) : null;
   const imageFaces = printableFaces(card);
   // Una sola imagen física aunque haya varias caras de texto (split, aventura): se fusionan.
@@ -218,7 +251,14 @@ export async function renderCustomEntry(entry, quality = 'png') {
       : custom.faces;
   return Promise.all(
     faces.map((f, i) => {
-      if (base && baseFaces?.[i]) return renderOverlay(imageOf(baseFaces[i], quality), f, f);
+      if (base && baseFaces?.[i]) {
+        return renderOriginalFace(base, i, f, quality, {
+          layout: custom.layouts?.[i],
+          colors: custom.colors?.[i],
+          titleScale: custom.titleScale,
+          fontScale: custom.fontScale,
+        });
+      }
       const art = f.art?.url || imageFaces[i]?.image?.art_crop || card.image?.art_crop || null;
       return renderCustom(art, f, f, card, {
         art: f.art,

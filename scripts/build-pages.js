@@ -26,6 +26,9 @@ fs.cpSync(path.join(root, 'public'), dist, { recursive: true });
 fs.mkdirSync(path.join(dist, 'vendor/jspdf'), { recursive: true });
 fs.copyFileSync(path.join(root, 'node_modules/jspdf/dist/jspdf.umd.min.js'), path.join(dist, 'vendor/jspdf/jspdf.umd.min.js'));
 fs.writeFileSync(path.join(dist, '.nojekyll'), '');
+// Marca de versión estática: la app no intentará hablar con un servidor (sin errores 404 en la consola).
+const indexFile = path.join(dist, 'index.html');
+fs.writeFileSync(indexFile, fs.readFileSync(indexFile, 'utf8').replace('<meta charset="utf-8">', '<meta charset="utf-8">\n  <meta name="mtp-static" content="1">'));
 console.log(`Web estática copiada en ${path.relative(root, dist)}/`);
 
 if (!args.includes('--no-memories')) {

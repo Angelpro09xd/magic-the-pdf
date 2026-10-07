@@ -8,6 +8,7 @@ import {
 } from './deck.js';
 import { openEditor } from './editor.js';
 import * as backend from './backend.js';
+import { initFonts } from './fonts.js';
 import { openArtPicker, pickByStyle } from './arts.js';
 import * as store from './storage.js';
 import { t, setUiLang, applyStaticTranslations } from './i18n.js';
@@ -1839,6 +1840,7 @@ function init() {
   bindIO();
   bindPdf();
   bindMisc();
+  initFonts().catch(() => {});
   selectDeck(store.loadCurrentId());
   backend.detectMode().then((mode) => {
     document.body.classList.toggle('static-mode', mode === 'static');

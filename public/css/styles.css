@@ -298,8 +298,14 @@ input[type="file"] { max-width: 100%; }
 .card-grid.hand { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 
 /* ---------- PDF ---------- */
-.pdf-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
-.pdf-form fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.pdf-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; }
+/* min-width: 0 evita que un <fieldset> se desborde (por defecto mide lo que su contenido más ancho). */
+.pdf-form fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pdf-form label { min-width: 0; }
+.pdf-form .check { align-items: flex-start; }
+.pdf-form .check input { margin-top: 3px; flex: none; }
+.pdf-form input[type="file"] { width: 100%; font-size: 12px; }
+.pdf-form label:has(input[type="file"]) { flex-direction: column; align-items: stretch; }
 .pdf-form legend { font-weight: 700; padding: 0 4px; }
 .pdf-form label:not(.check) { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .pdf-form input[type="number"] { width: 80px; }
@@ -339,7 +345,7 @@ input[type="file"] { max-width: 100%; }
 .editor-form fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px 10px; margin: 0 0 10px; }
 .editor-form legend { font-weight: 700; padding: 0 4px; }
 .editor-form label { display: block; margin: 6px 0 0; font-size: 12px; font-weight: 600; }
-.editor-form input:not([type="checkbox"]):not([type="range"]), .editor-form textarea { width: 100%; margin-top: 2px; font-family: inherit; font-size: 14px; }
+.editor-form input:not([type="checkbox"]):not([type="range"]):not([type="color"]), .editor-form textarea { width: 100%; margin-top: 2px; font-family: inherit; font-size: 14px; }
 .editor-form input[type="range"] { width: 100%; }
 .editor-form label.btn { display: inline-flex; font-weight: 500; margin: 0; font-size: 14px; }
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -349,7 +355,17 @@ input[type="file"] { max-width: 100%; }
 .face-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
 .editor-preview { position: sticky; top: 0; }
 .preview-canvases { display: flex; flex-direction: column; gap: 8px; }
-.preview-canvases canvas { width: 100%; border-radius: 14px; box-shadow: var(--shadow); }
+.preview-stage { position: relative; line-height: 0; user-select: none; }
+.preview-stage canvas, .preview-stage img.original-peek { width: 100%; border-radius: 14px; box-shadow: var(--shadow); }
+.preview-stage img.original-peek { position: absolute; inset: 0; }
+.zone { position: absolute; border: 2px dashed rgba(167, 123, 240, .9); background: rgba(167, 123, 240, .08); border-radius: 4px; cursor: move; touch-action: none; }
+.zone:hover { background: rgba(167, 123, 240, .18); }
+.zone-label { position: absolute; top: -18px; left: -2px; font: 600 10px/16px Inter, sans-serif; background: var(--accent); color: #fff; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+.zone-handle { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: var(--accent); border-radius: 3px; cursor: nwse-resize; }
+.color-row, .font-row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 6px; }
+.color-row label, .font-row label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.color-row input[type="color"] { width: 40px; height: 28px; padding: 1px; cursor: pointer; }
+.style-custom .only-overlay, .style-overlay .only-custom { display: none !important; }
 .editor-actions { justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 10px; }
 .mini-arts { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 4px; max-height: 220px; overflow: auto; }
 .mini-arts button { padding: 0; border: 2px solid transparent; border-radius: 4px; cursor: pointer; background: none; }
@@ -390,3 +406,6 @@ input[type="file"] { max-width: 100%; }
 .static-only { display: none; }
 .static-mode .static-only { display: block; }
 .static-mode .server-only { display: none; }
+.pdf-form select { max-width: 100%; min-width: 0; }
+.pdf-form label:not(.check) { flex-wrap: wrap; }
+.pdf-form label:not(.check) > select { flex: 1 1 140px; }

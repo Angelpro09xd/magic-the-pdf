@@ -16,7 +16,8 @@ let modePromise = null;
 /** Detecta si hay servidor (responde api/status) o si estamos en modo estático. */
 export function detectMode() {
   modePromise ??= (async () => {
-    if (location.protocol === 'file:') return 'static';
+    // La versión publicada (GitHub Pages) lleva esta marca: así no se pregunta por un servidor que no existe.
+    if (location.protocol === 'file:' || document.querySelector('meta[name="mtp-static"]')) return 'static';
     try {
       const res = await fetch('api/status', { signal: AbortSignal.timeout(4000) });
       const data = await res.json();
