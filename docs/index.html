@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Magic the PDF</title>
+  <meta name="description" content="Construye mazos de Commander de Magic: The Gathering, elige el idioma de las cartas, tradúcelas con IA y exporta proxies en PDF.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🃏</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="vendor/jspdf/jspdf.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">🃏</span>
+      <span class="brand-name">Magic the PDF</span>
+    </div>
+    <div class="deck-controls">
+      <select id="deckSelect" aria-label="Mazo"></select>
+      <button id="newDeck" class="btn" data-i18n-title="newDeck">＋</button>
+      <button id="renameDeck" class="btn" data-i18n-title="renameDeck">✎</button>
+      <button id="duplicateDeck" class="btn" data-i18n-title="duplicateDeck">⧉</button>
+      <button id="deleteDeck" class="btn danger" data-i18n-title="deleteDeck">🗑</button>
+      <button id="undoBtn" class="btn" data-i18n-title="undo" disabled>↶</button>
+      <button id="redoBtn" class="btn" data-i18n-title="redo" disabled>↷</button>
+    </div>
+    <label class="lang-picker">
+      <span data-i18n="cardLanguage">Idioma de las cartas</span>
+      <select id="deckLang"></select>
+    </label>
+    <div class="topbar-right">
+      <span id="aiStatus" class="pill"></span>
+      <select id="uiLang" aria-label="UI language">
+        <option value="es">ES</option>
+        <option value="en">EN</option>
+      </select>
+      <button id="themeToggle" class="btn" data-i18n-title="theme">◐</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Panel izquierdo: búsqueda y herramientas -->
+    <section class="panel">
+      <nav class="tabs" data-group="left" role="tablist">
+        <button class="tab active" data-tab="search" data-i18n="tabSearch">Buscar</button>
+        <button class="tab" data-tab="edhrec" data-i18n="tabEdhrec">Sugerencias</button>
+        <button class="tab" data-tab="combos" data-i18n="tabCombos">Combos</button>
+        <button class="tab" data-tab="io" data-i18n="tabIO">Importar / Exportar</button>
+      </nav>
+
+      <div class="tab-panel active" data-panel="search">
+        <form id="searchForm" class="search-form" autocomplete="off">
+          <div class="search-row">
+            <input id="searchInput" type="search" list="autocompleteList" data-i18n-placeholder="searchPlaceholder">
+            <datalist id="autocompleteList"></datalist>
+            <button class="btn primary" type="submit" data-i18n="search">Buscar</button>
+          </div>
+          <div class="filters">
+            <label class="check"><input type="checkbox" id="fCommander"> <span data-i18n="filterCommanders">Solo comandantes</span></label>
+            <label class="check"><input type="checkbox" id="fIdentity" checked> <span data-i18n="filterIdentity">Identidad del comandante</span></label>
+            <select id="fType">
+              <option value="" data-i18n="anyType">Cualquier tipo</option>
+              <option value="creature">Creature</option>
+              <option value="instant">Instant</option>
+              <option value="sorcery">Sorcery</option>
+              <option value="artifact">Artifact</option>
+              <option value="enchantment">Enchantment</option>
+              <option value="planeswalker">Planeswalker</option>
+              <option value="land">Land</option>
+              <option value="battle">Battle</option>
+            </select>
+            <select id="fCmc">
+              <option value="" data-i18n="anyCmc">Cualquier CMC</option>
+              <option value="0">0</option><option value="1">1</option><option value="2">2</option>
+              <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+              <option value="6">6</option><option value=">=7">7+</option>
+            </select>
+            <select id="fColors" data-i18n-title="filterColors">
+              <option value="" data-i18n="anyColor">Cualquier color</option>
+              <option value="w">⚪ W</option><option value="u">🔵 U</option><option value="b">⚫ B</option>
+              <option value="r">🔴 R</option><option value="g">🟢 G</option><option value="c">◇ C</option>
+              <option value="m" data-i18n="multicolor">Multicolor</option>
+            </select>
+            <select id="fOrder">
+              <option value="edhrec" data-i18n="orderPopularity">Popularidad (EDHREC)</option>
+              <option value="name" data-i18n="orderName">Nombre</option>
+              <option value="cmc">CMC</option>
+              <option value="usd" data-i18n="orderPrice">Precio</option>
+              <option value="released" data-i18n="orderReleased">Más recientes</option>
+            </select>
+            <label class="check"><input type="checkbox" id="fBudget"> <span data-i18n="filterBudget">Económicas (&lt; 1 $)</span></label>
+            <label class="check"><input type="checkbox" id="fInLang"> <span data-i18n="filterInLang">Existe en el idioma del mazo</span></label>
+          </div>
+          <div class="search-actions">
+            <span class="button-wrap">
+              <button type="button" id="randomCommander" class="btn" data-i18n="randomCommander">🎲 Comandante aleatorio</button>
+              <button type="button" id="newCustomCard" class="btn" data-i18n="newCustomCard">✨ Crear carta personalizada</button>
+            </span>
+            <a href="https://scryfall.com/docs/syntax" target="_blank" rel="noopener" class="muted small" data-i18n="syntaxHelp">Sintaxis avanzada de Scryfall</a>
+          </div>
+        </form>
+        <p id="searchInfo" class="muted small"></p>
+        <div id="searchResults" class="card-grid"></div>
+        <button id="searchMore" class="btn wide hidden" data-i18n="loadMore">Cargar más</button>
+      </div>
+
+      <div class="tab-panel" data-panel="edhrec">
+        <p class="muted small" data-i18n="edhrecHelp">Recomendaciones de EDHREC para tu comandante: cartas más jugadas y con más sinergia.</p>
+        <div class="row">
+          <button id="loadEdhrec" class="btn primary" data-i18n="loadSuggestions">Cargar sugerencias</button>
+          <label class="check"><input type="checkbox" id="edhrecHideOwned" checked> <span data-i18n="hideOwned">Ocultar las que ya tengo</span></label>
+        </div>
+        <div id="edhrecOut"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="combos">
+        <p class="muted small" data-i18n="combosHelp">Combos de Commander Spellbook que ya tiene tu mazo o a los que te falta una carta.</p>
+        <button id="loadCombos" class="btn primary" data-i18n="findCombos">Buscar combos</button>
+        <div id="combosOut"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="io">
+        <h3 data-i18n="importText">Importar lista</h3>
+        <p class="muted small" data-i18n="importTextHelp">Pega una lista (MTGO, Arena, Moxfield, Archidekt…). Usa la sección "Commander" o la marca *CMDR* para el comandante.</p>
+        <textarea id="importText" rows="9" placeholder="Commander&#10;1 Atraxa, Praetors' Voice&#10;&#10;Deck&#10;1 Sol Ring&#10;1 Arcane Signet (CMR) 297&#10;..."></textarea>
+        <div class="row">
+          <select id="importMode">
+            <option value="new" data-i18n="importNew">Crear mazo nuevo</option>
+            <option value="replace" data-i18n="importReplace">Reemplazar mazo actual</option>
+            <option value="merge" data-i18n="importMerge">Añadir al mazo actual</option>
+          </select>
+          <button id="importTextBtn" class="btn primary" data-i18n="import">Importar</button>
+        </div>
+        <div class="server-only">
+          <h3 data-i18n="importUrl">Importar desde URL</h3>
+          <div class="row">
+            <input id="importUrl" type="url" placeholder="https://archidekt.com/decks/…">
+            <button id="importUrlBtn" class="btn" data-i18n="import">Importar</button>
+          </div>
+          <p class="muted small">Archidekt · Moxfield · MTGGoldfish · TappedOut</p>
+        </div>
+        <p class="static-only muted small" data-i18n="importStatic"></p>
+        <h3 data-i18n="export">Exportar</h3>
+        <div class="button-wrap">
+          <button class="btn" data-export="mtgo">MTGO / Moxfield</button>
+          <button class="btn" data-export="arena">Arena</button>
+          <button class="btn" data-export="plain" data-i18n="exportPlain">Solo nombres</button>
+          <button class="btn" data-export="csv">CSV</button>
+          <button class="btn" data-export="json">JSON (backup)</button>
+          <button class="btn" data-export="copy" data-i18n="copyList">Copiar lista</button>
+          <button class="btn" data-export="share" data-i18n="shareLink">🔗 Enlace para compartir</button>
+        </div>
+        <h3 data-i18n="restoreBackup">Restaurar copia JSON</h3>
+        <input id="importJson" type="file" accept="application/json,.json">
+      </div>
+    </section>
+
+    <!-- Panel derecho: el mazo -->
+    <section class="panel">
+      <div id="deckHeader" class="deck-header"></div>
+      <nav class="tabs" data-group="right" role="tablist">
+        <button class="tab active" data-tab="deck" data-i18n="tabDeck">Mazo</button>
+        <button class="tab" data-tab="lang" data-i18n="tabLang">Idioma y traducción</button>
+        <button class="tab" data-tab="stats" data-i18n="tabStats">Análisis</button>
+        <button class="tab" data-tab="hand" data-i18n="tabHand">Mano de prueba</button>
+        <button class="tab" data-tab="pdf" data-i18n="tabPdf">PDF</button>
+      </nav>
+
+      <div class="tab-panel active" data-panel="deck">
+        <div class="row">
+          <label><span data-i18n="groupBy">Agrupar por</span>
+            <select id="groupBy">
+              <option value="type" data-i18n="groupType">Tipo</option>
+              <option value="cmc">CMC</option>
+              <option value="role" data-i18n="groupRole">Función</option>
+              <option value="status" data-i18n="groupStatus">Estado del idioma</option>
+            </select>
+          </label>
+          <label><span data-i18n="view">Vista</span>
+            <select id="deckView">
+              <option value="list" data-i18n="viewList">Lista</option>
+              <option value="grid" data-i18n="viewGrid">Imágenes</option>
+            </select>
+          </label>
+          <input id="deckFilter" type="search" data-i18n-placeholder="filterDeck">
+        </div>
+        <details class="bulk-arts">
+          <summary data-i18n="bulkArtsTitle">🎨 Artes de todo el mazo</summary>
+          <p class="muted small" data-i18n="bulkArtsHelp">Cambia la edición de todas las cartas (salvo las básicas) de una vez. Siempre puedes cambiar una carta concreta con 🎨.</p>
+          <div class="row">
+            <select id="bulkArtStyle">
+              <option value="newest" data-i18n="bulkNewest">Las más recientes</option>
+              <option value="oldest" data-i18n="bulkOldest">Las originales (primera edición)</option>
+              <option value="cheapest" data-i18n="bulkCheapest">Las más baratas</option>
+              <option value="fancy" data-i18n="bulkFancy">Especiales (sin borde, showcase…)</option>
+              <option value="modern" data-i18n="bulkModern">Marco moderno (mejor para traducir)</option>
+            </select>
+            <button id="bulkArtApply" class="btn" data-i18n="apply">Aplicar</button>
+          </div>
+          <div id="bulkArtProgress" class="progress hidden"><div class="bar"></div><span class="label"></span></div>
+        </details>
+        <div id="validation" class="validation"></div>
+        <div id="deckList"></div>
+        <div id="tokensList"></div>
+        <label class="notes-label"><span data-i18n="notes">Notas del mazo</span>
+          <textarea id="deckNotes" rows="3"></textarea>
+        </label>
+      </div>
+
+      <div class="tab-panel" data-panel="lang">
+        <div class="callout">
+          <p data-i18n-html="langHelp"></p>
+        </div>
+        <div class="row">
+          <button id="prepareBtn" class="btn primary" data-i18n="prepareLang">Buscar oficiales y traducir</button>
+          <button id="searchOnlyBtn" class="btn" data-i18n="searchOnly">Solo buscar oficiales</button>
+          <button id="retranslateBtn" class="btn" data-i18n="retranslate">Volver a traducir lo automático</button>
+        </div>
+        <div id="prepareProgress" class="progress hidden"><div class="bar"></div><span class="label"></span></div>
+        <div id="langSummary" class="lang-summary"></div>
+        <div id="langList" class="lang-list"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="stats">
+        <div id="statsOut" class="stats"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="hand">
+        <div class="row">
+          <button id="newHand" class="btn primary" data-i18n="newHand">Nueva mano</button>
+          <button id="mulligan" class="btn" data-i18n="mulligan">Mulligan</button>
+          <button id="drawCard" class="btn" data-i18n="draw">Robar</button>
+        </div>
+        <p id="handInfo" class="muted small"></p>
+        <div id="handOut" class="card-grid hand"></div>
+        <div id="handOdds" class="muted small"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="pdf">
+        <form id="pdfForm" class="pdf-form">
+          <fieldset>
+            <legend data-i18n="pdfPaper">Papel y tamaño</legend>
+            <label><span data-i18n="paper">Papel</span>
+              <select name="paper"><option value="a4">A4</option><option value="letter">Letter</option><option value="a3">A3</option></select>
+            </label>
+            <label><span data-i18n="scale">Escala (%)</span> <input name="scale" type="number" min="80" max="110" step="0.5"></label>
+            <label><span data-i18n="gap">Separación (mm)</span> <input name="gap" type="number" min="0" max="10" step="0.5"></label>
+            <label><span data-i18n="bleed">Sangrado negro (mm)</span> <input name="bleed" type="number" min="0" max="3" step="0.5"></label>
+            <label class="check"><input name="cutMarks" type="checkbox"> <span data-i18n="cutMarks">Marcas de corte</span></label>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="pdfContent">Contenido</legend>
+            <label class="check"><input name="deckList" type="checkbox"> <span data-i18n="deckListPage">Página con la lista del mazo</span></label>
+            <label class="check"><input name="calibration" type="checkbox"> <span data-i18n="calibrationPage">Página de calibración (regla)</span></label>
+            <label class="check"><input name="includeCommanders" type="checkbox"> <span data-i18n="includeCommanders">Incluir comandante(s)</span></label>
+            <label class="check"><input name="skipBasics" type="checkbox"> <span data-i18n="skipBasics">Omitir tierras básicas</span></label>
+            <label class="check"><input name="includeTokens" type="checkbox"> <span data-i18n="includeTokens">Incluir fichas y emblemas</span></label>
+            <label class="check"><input name="watermark" type="checkbox"> <span data-i18n="watermark">Marca "PROXY"</span></label>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="pdfBacks">Reversos y doble cara</legend>
+            <label class="check"><input name="dfcDuplex" type="checkbox"> <span data-i18n="dfcDuplex">Cartas de doble cara: dorso detrás (impresión a doble cara)</span></label>
+            <label class="check"><input name="backs" type="checkbox"> <span data-i18n="printBacks">Imprimir reversos</span></label>
+            <label><span data-i18n="customBack">Reverso personalizado</span> <input id="backImageInput" type="file" accept="image/*"></label>
+            <button type="button" id="clearBack" class="btn small" data-i18n="clearBack">Quitar reverso personalizado</button>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="pdfQuality">Calidad y traducción</legend>
+            <label><span data-i18n="imageQuality">Imágenes</span>
+              <select name="quality">
+                <option value="png" data-i18n="qualityHigh">Alta (PNG 745×1040)</option>
+                <option value="large" data-i18n="qualityNormal">Normal (JPG 672×936, más rápido)</option>
+              </select>
+            </label>
+            <label><span data-i18n="translatedMode">Cartas traducidas</span>
+              <select name="translatedMode">
+                <option value="overlay" data-i18n="modeOverlay">Texto sobre la carta original</option>
+                <option value="custom" data-i18n="modeCustom">Marco propio con el arte</option>
+              </select>
+            </label>
+            <label class="check"><input name="autoTranslate" type="checkbox"> <span data-i18n="autoTranslate">Traducir automáticamente lo que falte al generar</span></label>
+          </fieldset>
+        </form>
+        <details class="print-select">
+          <summary data-i18n="printSelection">Elegir qué cartas imprimir</summary>
+          <div class="row">
+            <button type="button" class="btn small" data-sel="all" data-i18n="selAll">Todas</button>
+            <button type="button" class="btn small" data-sel="none" data-i18n="selNone">Ninguna</button>
+            <button type="button" class="btn small" data-sel="translated" data-i18n="selTranslated">Solo traducidas/editadas</button>
+            <button type="button" class="btn small" data-sel="official" data-i18n="selOfficial">Solo oficiales</button>
+          </div>
+          <div id="printSelectList" class="print-select-list"></div>
+        </details>
+        <p id="pdfSummary" class="muted"></p>
+        <div class="row">
+          <button id="generatePdf" class="btn primary big" data-i18n="generatePdf">📄 Generar PDF</button>
+          <button id="cancelPdf" class="btn hidden" data-i18n="cancel">Cancelar</button>
+        </div>
+        <div id="pdfProgress" class="progress hidden"><div class="bar"></div><span class="label"></span></div>
+        <div id="pdfResult"></div>
+        <p class="muted small" data-i18n="printTip">Consejo: imprime al 100 % ("tamaño real"), sin "ajustar a la página". Cada carta mide 63 × 88 mm.</p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="cardModal" class="modal">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="cardModalBody"></div>
+  </dialog>
+
+  <dialog id="editorModal" class="modal wide">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="editorModalBody"></div>
+  </dialog>
+
+  <dialog id="artModal" class="modal wide">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="artModalBody"></div>
+  </dialog>
+
+  <div id="hoverPreview" class="hover-preview hidden"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <footer class="footer">
+    <p data-i18n-html="footer"></p>
+  </footer>
+</body>
+</html>
