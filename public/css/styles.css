@@ -409,3 +409,73 @@ input[type="file"] { max-width: 100%; }
 .pdf-form select { max-width: 100%; min-width: 0; }
 .pdf-form label:not(.check) { flex-wrap: wrap; }
 .pdf-form label:not(.check) > select { flex: 1 1 140px; }
+
+/* ---------- Animación de escaneo/traducción ---------- */
+.images.scanning, .review-preview.scanning { position: relative; }
+.scanning > img, .scanning > canvas { filter: saturate(.55) brightness(.8) blur(.6px); transition: filter .3s; }
+.scan-overlay { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; pointer-events: none;
+  background: linear-gradient(180deg, rgba(123, 75, 196, .10), rgba(20, 10, 40, .35)); }
+.scan-line { position: absolute; left: 0; right: 0; height: 18%; top: -18%;
+  background: linear-gradient(180deg, transparent, rgba(190, 150, 255, .55) 70%, rgba(255, 255, 255, .9) 96%, transparent);
+  box-shadow: 0 6px 24px rgba(190, 150, 255, .6); animation: scan 1.8s cubic-bezier(.45, 0, .55, 1) infinite; }
+.scan-sparkles { position: absolute; inset: 0; opacity: .6;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, .9) 1px, transparent 1.5px), radial-gradient(circle, rgba(200, 170, 255, .8) 1px, transparent 1.5px);
+  background-size: 37px 41px, 53px 47px; animation: sparkle 3s linear infinite; }
+.scan-label { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); white-space: nowrap;
+  background: rgba(20, 12, 35, .85); color: #fff; padding: 6px 12px; border-radius: 999px; font: 600 13px Inter, sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .4); }
+.scan-label .dots::after { content: ''; animation: dots 1.2s steps(4) infinite; }
+.scan-overlay.failed { background: rgba(120, 20, 20, .25); }
+.scan-overlay.failed .scan-line, .scan-overlay.failed .scan-sparkles { display: none; }
+canvas.reveal { animation: reveal .6s ease-out; }
+@keyframes scan { 0% { top: -18%; } 100% { top: 100%; } }
+@keyframes sparkle { from { background-position: 0 0, 0 0; } to { background-position: 37px -82px, -53px 94px; } }
+@keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+@keyframes reveal { from { opacity: 0; transform: scale(.97); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .scan-line, .scan-sparkles, canvas.reveal { animation: none; }
+}
+
+/* ---------- Revisión de traducciones ---------- */
+.wide-btn { width: 100%; margin: 10px 0 4px; }
+.review-modal { width: min(1400px, calc(100vw - 24px)); height: calc(100vh - 32px); }
+.review-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-right: 40px; }
+.review-head h2 { margin: 0; }
+.review-lang { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.review-tabs .count { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--panel-2); font-size: 11px; color: var(--text); }
+.review-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px; height: calc(100% - 140px); min-height: 400px; }
+@media (max-width: 860px) { .review-layout { grid-template-columns: 1fr; height: auto; } .review-list { max-height: 240px; } }
+.review-list { overflow: auto; display: flex; flex-direction: column; gap: 3px; padding-right: 4px; }
+.review-item { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left; padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; background: none; color: inherit; font: inherit; cursor: pointer; }
+.review-item:hover { background: var(--panel-2); }
+.review-item.active { border-color: var(--accent); background: var(--accent-soft); }
+.review-item img { width: 34px; border-radius: 3px; }
+.review-item .nm { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; }
+.review-item .nm small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.rstate { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.rstate.review { border-color: var(--warn); color: var(--warn); }
+.rstate.accepted, .rstate.custom { border-color: var(--ok); color: var(--ok); }
+.rstate.original { color: var(--muted); }
+.rstate.official { border-color: var(--info); color: var(--info); }
+.rstate.failed { border-color: var(--err); color: var(--err); }
+.review-detail { overflow: auto; padding-right: 4px; }
+.review-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 760px; }
+.review-compare figure { margin: 0; }
+.review-compare figcaption { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.review-compare img, .review-compare canvas { width: 100%; border-radius: 12px; display: block; }
+.review-preview { position: relative; }
+.review-actions .spacer { flex: 1; }
+.review-fields fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px 10px; margin: 0 0 8px; }
+.review-fields label { display: block; font-size: 12px; font-weight: 600; margin-top: 6px; }
+.review-fields input, .review-fields textarea { width: 100%; font-family: inherit; font-size: 14px; margin-top: 2px; }
+.review-fields .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.review-fields pre { white-space: pre-wrap; font-family: inherit; margin: 4px 0; }
+.review-keys { margin-top: 6px; }
+.review-generating { text-align: center; padding: 60px 20px; max-width: 520px; margin: 0 auto; }
+.card-stack { position: relative; width: 90px; height: 126px; margin: 0 auto 24px; }
+.card-stack span { position: absolute; inset: 0; border-radius: 8px; border: 3px solid #111; background: linear-gradient(135deg, #5b3a8c, #1d1033); box-shadow: 0 6px 18px rgba(0,0,0,.35); animation: deal 1.8s ease-in-out infinite; }
+.card-stack span:nth-child(2) { animation-delay: .3s; background: linear-gradient(135deg, #1a74b8, #0c4f86); }
+.card-stack span:nth-child(3) { animation-delay: .6s; background: linear-gradient(135deg, #1b8a4f, #0f5a33); }
+@keyframes deal { 0%, 100% { transform: translateX(0) rotate(0); } 30% { transform: translateX(-46px) rotate(-12deg); } 60% { transform: translateX(46px) rotate(12deg); } }
+@media (prefers-reduced-motion: reduce) { .card-stack span { animation: none; } }
+.modal-grid .images { align-self: start; }

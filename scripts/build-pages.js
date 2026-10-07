@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LANGUAGES } from '../public/js/languages.js';
+import { PRINTED_LANGUAGES } from '../public/js/languages.js';
 import { createMemoryStore } from '../server/lib/memoryStore.js';
 import { createThrottle } from '../server/lib/http.js';
 
@@ -32,7 +32,7 @@ fs.writeFileSync(indexFile, fs.readFileSync(indexFile, 'utf8').replace('<meta ch
 console.log(`Web estática copiada en ${path.relative(root, dist)}/`);
 
 if (!args.includes('--no-memories')) {
-  const langs = (opt('--langs', '') || LANGUAGES.map((l) => l.code).join(','))
+  const langs = (opt('--langs', '') || PRINTED_LANGUAGES.map((l) => l.code).join(','))
     .split(',')
     .map((l) => l.trim())
     .filter((l) => l && l !== 'en');

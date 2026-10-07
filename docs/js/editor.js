@@ -4,7 +4,7 @@
  * carta, subido o por URL) con zoom y encuadre, color de marco, tamaño de letra y estilo.
  * También sirve para crear cartas personalizadas desde cero.
  */
-import { LANGUAGES, getLanguage } from './languages.js';
+import { getLanguage, languageOptions } from './languages.js';
 import * as sf from './scryfall.js';
 import { t } from './i18n.js';
 import { printableFaces, textFaces } from './deck.js';
@@ -126,13 +126,13 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
             card.custom
               ? ''
               : `<div class="row">
-              <select data-k="tlang">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === targetLang(entry, deck) ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}</select>
+              <select data-k="tlang">${languageOptions(targetLang(entry, deck), { printed: t('langGroupPrinted'), translated: t('langGroupTranslated') })}</select>
               <button type="button" class="btn primary" data-a="translate">🌐 ${esc(t('translateCard'))}</button>
               <button type="button" class="btn" data-a="english">${esc(t('englishText'))}</button>
               ${off ? `<button type="button" class="btn" data-a="official">${esc(t('officialText'))}</button>` : ''}
             </div>`
           }
-          ${card.custom ? `<div class="row"><select data-k="tlang">${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === targetLang(entry, deck) ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}</select><button type="button" class="btn" data-a="translate">🌐 ${esc(t('translateCustom'))}</button></div>` : ''}
+          ${card.custom ? `<div class="row"><select data-k="tlang">${languageOptions(targetLang(entry, deck), { printed: t('langGroupPrinted'), translated: t('langGroupTranslated') })}</select><button type="button" class="btn" data-a="translate">🌐 ${esc(t('translateCustom'))}</button></div>` : ''}
         </fieldset>
         <fieldset>
           <legend>${esc(t('edStyle'))}</legend>

@@ -1,4 +1,4 @@
-import { LANGUAGES, getLanguage } from './languages.js';
+import { getLanguage, languageOptions, isPrinted } from './languages.js';
 import * as sf from './scryfall.js';
 import {
   parseDeckText, exportDeckText, exportDeckCsv, validateDeck, deckStats, deckIdentity, countCards,
@@ -10,6 +10,7 @@ import { openEditor } from './editor.js';
 import * as backend from './backend.js';
 import { initFonts } from './fonts.js';
 import { openArtPicker, pickByStyle } from './arts.js';
+import { openReview } from './review.js';
 import * as store from './storage.js';
 import { t, setUiLang, applyStaticTranslations } from './i18n.js';
 import { langStatus, officialPrint, displayName, prepareEntries, renderEntry, targetLang, faceKey } from './resolve.js';
@@ -44,6 +45,38 @@ function toast(message, type = '') {
   setTimeout(() => node.remove(), type === 'error' ? 7000 : 3500);
 }
 
+/**
+ * Animación de "escaneo" sobre las imágenes de una carta mientras se traduce o se compone.
+ * Devuelve { set(label), done(canvases), fail(msg) }.
+ */
+function scanOverlay(container, label) {
+  container.classList.add('scanning');
+  const overlay = document.createElement('div');
+  overlay.className = 'scan-overlay';
+  overlay.innerHTML = `<div class="scan-line"></div><div class="scan-sparkles"></div><div class="scan-label"><span class="spinner"></span> <span class="txt"></span><span class="dots"></span></div>`;
+  overlay.querySelector('.txt').textContent = label;
+  container.append(overlay);
+  return {
+    set(text) {
+      overlay.querySelector('.txt').textContent = text;
+    },
+    done(canvases) {
+      container.classList.remove('scanning');
+      container.innerHTML = '';
+      for (const c of canvases) {
+        c.classList.add('reveal');
+        container.append(c);
+      }
+    },
+    fail(msg) {
+      container.classList.remove('scanning');
+      overlay.classList.add('failed');
+      overlay.querySelector('.scan-label').textContent = `⚠ ${msg}`;
+      setTimeout(() => overlay.remove(), 4000);
+    },
+  };
+}
+
 function setProgress(node, done, total, label) {
   node.classList.remove('hidden');
   $('.bar', node).style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
@@ -59,6 +92,8 @@ function download(filename, content, type) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+const langGroups = () => ({ printed: t('langGroupPrinted'), translated: t('langGroupTranslated') });
 
 const fileSafe = (s) => s.replace(/[^\p{L}\p{N}\- ]+/gu, '').trim().replace(/\s+/g, '_') || 'mazo';
 
@@ -185,7 +220,7 @@ function renderDeckSelect() {
 
 function bindHeader() {
   const langSel = $('#deckLang');
-  langSel.innerHTML = LANGUAGES.map((l) => `<option value="${l.code}">${l.flag} ${esc(l.name)}</option>`).join('');
+  langSel.innerHTML = languageOptions(state.deck?.lang, langGroups());
   langSel.addEventListener('change', () => {
     state.deck.lang = langSel.value;
     saveDeck();
@@ -420,7 +455,7 @@ function buildQuery() {
   if (color === 'm') parts.push('c:m');
   else if (color) parts.push(`c:${color}`);
   if ($('#fBudget').checked) parts.push('usd<1');
-  if ($('#fInLang').checked && state.deck.lang !== 'en') parts.push(`lang:${state.deck.lang}`);
+  if ($('#fInLang').checked && state.deck.lang !== 'en' && isPrinted(state.deck.lang)) parts.push(`lang:${state.deck.lang}`);
   parts.push('legal:commander', 'game:paper');
   return parts.filter(Boolean).join(' ');
 }
@@ -530,11 +565,13 @@ function renderDeckHeader() {
         <span>${lang.flag} ${esc(lang.name)}</span>
         <span>$${stats.usd.toFixed(2)} · €${stats.eur.toFixed(2)}</span>
         <span>${esc(t('avgCmc'))}: ${stats.avgCmc.toFixed(2)}</span>
+        ${deck.lang !== 'en' && allEntries().length ? `<button class="btn small primary" data-act="reviewAll">${esc(t('translateAllReview'))}</button>` : ''}
       </div>
     </div>`;
   $$('#deckHeader img[data-uid]').forEach((img) =>
     img.addEventListener('click', () => openEntryModal(deck.commanders.find((e) => e.uid === img.dataset.uid))),
   );
+  $('#deckHeader [data-act="reviewAll"]')?.addEventListener('click', openTranslationReview);
 }
 
 function issueText(issue) {
@@ -724,7 +761,7 @@ function setPrint(entry, print) {
   }
 }
 
-function editEntry(entry) {
+function editEntry(entry, onDone) {
   openEditor({
     entry,
     deck: state.deck,
@@ -737,6 +774,7 @@ function editEntry(entry) {
       saveDeck();
       renderDeckPanels();
       toast(t('cardSaved'), 'ok');
+      onDone?.();
     },
     onRemove: () => {
       delete entry.custom;
@@ -928,7 +966,7 @@ async function openCardModal(card, entry = findEntry(card)) {
         </div>
         ${inDeck ? `<div class="row small">
             <label>${esc(t('cardLangOverride'))}
-              <select data-act="lang"><option value="">${esc(t('deckDefault'))}</option>${LANGUAGES.map((l) => `<option value="${l.code}" ${entry.lang === l.code ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}</select>
+              <select data-act="lang"><option value="">${esc(t('deckDefault'))}</option>${languageOptions(entry.lang, langGroups())}</select>
             </label>
             <label>${esc(t('renderMode'))}
               <select data-act="mode">
@@ -961,16 +999,31 @@ async function openCardModal(card, entry = findEntry(card)) {
       </div>
     </div>`;
 
-  // Vista previa de la carta traducida o editada, tal como se imprimirá
-  if (entry && (translation || entry.custom)) {
-    renderEntry(entry, deck, settings.pdf)
-      .then((canvases) => {
-        const imgs = $('#modalImages');
-        if (!imgs) return;
-        imgs.innerHTML = '';
-        imgs.append(...canvases);
-      })
-      .catch(() => {});
+  // Vista previa de la carta traducida o editada, tal como se imprimirá (con animación mientras carga).
+  const lang = entry ? targetLang(entry, deck) : deck.lang;
+  const needsTranslation =
+    inDeck && !off && !entry.custom && !card.custom && lang !== 'en' && entry.renderMode !== 'original' && !translation;
+  if (entry && inDeck && (translation || entry.custom || needsTranslation)) {
+    const scan = scanOverlay($('#modalImages'), needsTranslation ? t('scanTranslating') : t('scanReading'));
+    (async () => {
+      if (needsTranslation) {
+        await prepareEntries([entry], deck, { translateFn: translateApi });
+        saveDeck();
+        renderDeckPanels();
+        if (entry.translation?.lang !== lang) {
+          scan.fail(entry.translationError || t('translateFailed'));
+          return;
+        }
+        // Volvemos a abrir la ficha ya con el texto traducido (y su propia animación de composición).
+        if ($('#cardModal').open) openCardModal(card, entry);
+        return;
+      }
+      setTimeout(() => scan.set(t('scanComposing')), 900);
+      const canvases = await renderEntry(entry, deck, settings.pdf);
+      const imgs = $('#modalImages');
+      if (!imgs?.isConnected) return;
+      scan.done(canvases);
+    })().catch((err) => scan.fail(err.message));
   }
 
   body.onclick = async (ev) => {
@@ -1221,6 +1274,21 @@ function openTranslationEditor(entry, container) {
     }
   };
   preview();
+}
+
+/** Traduce todas las cartas que no tienen versión oficial y abre el panel de revisión. */
+function openTranslationReview() {
+  if (!allEntries().length) return toast(t('emptyDeck'));
+  openReview({
+    deck: state.deck,
+    entries: () => allEntries(),
+    translateFn: translateApi,
+    renderSettings: () => settings.pdf,
+    save: saveDeck,
+    refresh: renderDeckPanels,
+    editEntry,
+    toast,
+  });
 }
 
 // ---------------------------------------------------------------- análisis
@@ -1797,6 +1865,7 @@ async function generatePdf() {
 
 function bindMisc() {
   $('#prepareBtn').addEventListener('click', () => runPrepare({ translate: true }));
+  $('#reviewAllBtn').addEventListener('click', openTranslationReview);
   $('#searchOnlyBtn').addEventListener('click', () => runPrepare({ translate: false }));
   $('#retranslateBtn').addEventListener('click', () => {
     if (confirm(t('confirmRetranslate'))) runPrepare({ translate: true, retranslateMachine: true });
@@ -1805,7 +1874,7 @@ function bindMisc() {
   $('#mulligan').addEventListener('click', mulligan);
   $('#drawCard').addEventListener('click', drawCard);
   $('#loadCombos').addEventListener('click', loadCombos);
-  for (const id of ['#cardModal', '#editorModal', '#artModal']) {
+  for (const id of ['#cardModal', '#editorModal', '#artModal', '#reviewModal']) {
     $(id).addEventListener('click', (e) => {
       if (e.target === e.currentTarget) e.currentTarget.close();
     });

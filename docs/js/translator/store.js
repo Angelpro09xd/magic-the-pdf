@@ -3,6 +3,7 @@
  * Común al servidor (guarda en disco) y al navegador (ficheros precalculados + IndexedDB).
  */
 import { TranslationMemory } from './memory.js';
+import { isPrinted } from '../languages.js';
 
 export const MEMORY_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 
@@ -100,7 +101,8 @@ export function createMemoryStore({ load = async () => null, save = async () => 
   }
 
   function get(lang) {
-    if (lang === 'en') return Promise.resolve(null);
+    // Sin cartas oficiales en ese idioma no hay nada que aprender: solo traducción automática.
+    if (lang === 'en' || !isPrinted(lang)) return Promise.resolve(null);
     if (!memories.has(lang)) {
       status.set(lang, { building: true, page: 0, pages: 0 });
       const p = obtain(lang);

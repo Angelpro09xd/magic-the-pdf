@@ -5,6 +5,7 @@
  */
 import { findOverlayBases, findPrintsInLanguage, overlayFriendly } from './scryfall.js';
 import { printableFaces, textFaces } from './deck.js';
+import { isPrinted } from './languages.js';
 import { renderCustom, renderOfficial, renderOverlay } from './render.js';
 import { analyzeCard, renderOriginalStyle } from './original.js';
 
@@ -68,7 +69,10 @@ export async function prepareEntries(entries, deck, { translateFn, onProgress = 
   for (const [lang, list] of byLang) {
     // 1) Impresiones oficiales
     const toSearch = list.filter((e) => langStatus(e, deck) === 'pending');
-    if (toSearch.length) {
+    if (toSearch.length && !isPrinted(lang)) {
+      // Magic no se imprime en este idioma: no hay nada que buscar, todo se traduce.
+      for (const e of toSearch) e.searched = [...new Set([...(e.searched || []), lang])];
+    } else if (toSearch.length) {
       onProgress({ phase: 'search', lang, done: 0, total: toSearch.length });
       const found = await findPrintsInLanguage(toSearch.map((e) => e.card), lang, (d, t) =>
         onProgress({ phase: 'search', lang, done: d, total: t }),

@@ -3,7 +3,7 @@
  * - Modo simple: eliges una impresión.
  * - Modo múltiple (tierras básicas…): eliges varios artes y cada copia usa uno distinto.
  */
-import { LANGUAGES } from './languages.js';
+import { PRINTED_LANGUAGES } from './languages.js';
 import * as sf from './scryfall.js';
 import { t } from './i18n.js';
 import { shuffle } from './deck.js';
@@ -44,7 +44,7 @@ export function openArtPicker({ card, deckLang = 'en', currentId = null, multi =
     <div class="row art-filters">
       <select data-f="lang">
         <option value="any">${esc(t('allLanguages'))}</option>
-        ${LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === state.lang ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}
+        ${PRINTED_LANGUAGES.map((l) => `<option value="${l.code}" ${l.code === state.lang ? 'selected' : ''}>${l.flag} ${esc(l.name)}</option>`).join('')}
       </select>
       <select data-f="style">${STYLES.map((s) => `<option value="${s}">${esc(t(`style_${s}`))}</option>`).join('')}</select>
       <select data-f="sort">

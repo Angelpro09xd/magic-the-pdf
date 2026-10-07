@@ -12,7 +12,10 @@
 import { CARD_H, CARD_W, drawRules, ensureFonts, ensureSymbols, fitText, loadImage, newCanvas, titleFont } from './render.js';
 import { idbGet, idbSet } from './idb.js';
 
-const ANALYSIS_VERSION = 5;
+const ANALYSIS_VERSION = 7;
+// Las fuentes libres por defecto tienen las minúsculas algo más bajas que las oficiales:
+// se compensa para que el texto ocupe lo mismo (si no cabe, drawRules lo reduce).
+const RULES_COMPENSATION = 1.1;
 const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 
 // ---------------------------------------------------------------- OCR
@@ -420,6 +423,12 @@ function regionsFromOcr(words, face) {
     out.type = { rect: { x: b.x0 - 2, y: b.y0 - hgt * 0.08, w: b.x1 - b.x0 + 6, h: hgt * 1.16 }, size: hgt * 1.08, align: 'left' };
   }
 
+  // En las cartas el nombre y el tipo van casi al mismo tamaño: si uno se midió de más, se iguala.
+  if (out.name && out.type) {
+    out.type.size = Math.min(out.type.size, out.name.size);
+    out.name.size = Math.min(out.name.size, out.type.size * 1.2);
+  }
+
   // Texto de reglas (y ambientación): palabras que coinciden con el texto oficial, bajo el tipo
   // (o en cualquier sitio si el tipo no se encontró: sagas y cartas con el texto a un lado).
   const minY = type && kind !== 'saga' ? type.line.y1 : name ? name.line.y1 + 20 : 0;
@@ -447,8 +456,12 @@ function regionsFromOcr(words, face) {
     }
     pitches.sort((a, c) => a - c);
     const heights = hitWords.map((w) => w.y1 - w.y0).sort((a, c) => a - c);
-    const pitch = pitches.length ? pitches[Math.floor(pitches.length / 3)] : null;
-    const size = pitch ? pitch / 1.13 : heights[Math.floor(heights.length / 2)] * 1.15;
+    // Tamaño de letra: por el espaciado típico entre líneas (descartando líneas partidas por el OCR)
+    // y nunca menor que lo que miden las propias palabras.
+    const wordH = heights[Math.floor(heights.length / 2)] || 20;
+    const goodPitches = pitches.filter((p) => p > wordH * 0.9);
+    const pitch = goodPitches.length ? goodPitches[Math.floor(goodPitches.length / 2)] : null;
+    const size = Math.max(pitch ? pitch / 1.13 : 0, wordH * 1.05);
     const single = ruleLines.length === 1;
     const lineCenter = (b.x0 + b.x1) / 2;
     const pad = size * 0.35;
@@ -589,12 +602,12 @@ export async function renderOriginalStyle(imageUrl, face, t, analysis, opts = {}
     const paras = t.oracle_text.split('\n');
     paraRects.forEach((r, i) => {
       if (!r || paras[i] == null) return;
-      drawRules(ctx, stripPrefix(paras[i], analysis.kind), r, { color: rulesColor, maxSize: text.size * fontScale, align: 'left' });
+      drawRules(ctx, stripPrefix(paras[i], analysis.kind), r, { color: rulesColor, maxSize: text.size * fontScale * RULES_COMPENSATION, align: 'left' });
     });
   } else {
     drawRules(ctx, t.oracle_text, text.rect, {
       color: rulesColor,
-      maxSize: text.size * fontScale,
+      maxSize: text.size * fontScale * RULES_COMPENSATION,
       align: text.align,
       flavor: opts.showFlavor === false ? '' : t.flavor_text || '',
     });

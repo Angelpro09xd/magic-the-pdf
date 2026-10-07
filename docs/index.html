@@ -216,8 +216,9 @@
         <div class="callout">
           <p data-i18n-html="langHelp"></p>
         </div>
+        <button id="reviewAllBtn" class="btn primary big wide-btn" data-i18n="translateAllReview">✨ Traducir todo y revisar</button>
         <div class="row">
-          <button id="prepareBtn" class="btn primary" data-i18n="prepareLang">Buscar oficiales y traducir</button>
+          <button id="prepareBtn" class="btn" data-i18n="prepareLang">Buscar oficiales y traducir</button>
           <button id="searchOnlyBtn" class="btn" data-i18n="searchOnly">Solo buscar oficiales</button>
           <button id="retranslateBtn" class="btn" data-i18n="retranslate">Volver a traducir lo automático</button>
         </div>
@@ -316,6 +317,11 @@
   <dialog id="editorModal" class="modal wide">
     <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
     <div id="editorModalBody"></div>
+  </dialog>
+
+  <dialog id="reviewModal" class="modal wide review-modal">
+    <form method="dialog" class="modal-close"><button class="btn" aria-label="Cerrar">✕</button></form>
+    <div id="reviewModalBody"></div>
   </dialog>
 
   <dialog id="artModal" class="modal wide">
