@@ -4,7 +4,7 @@
  *  - overlay:  imagen inglesa con marco moderno + texto traducido superpuesto
  *  - custom:   marco propio dibujado desde cero con el arte y el texto traducido
  */
-import { proxied, symbology } from './scryfall.js';
+import { symbology } from './scryfall.js';
 
 export const CARD_W = 745;
 export const CARD_H = 1040;
@@ -16,7 +16,10 @@ const imageCache = new Map();
 
 export function loadImage(url) {
   if (!url) return Promise.reject(new Error('Sin imagen'));
-  const src = url.startsWith('/') || url.startsWith('data:') ? url : proxied(url);
+  // Las imágenes de Scryfall permiten CORS y se cargan directamente (también en GitHub Pages).
+  // Se usa una URL distinta de la de las <img> normales: si no, el navegador reutiliza su copia
+  // en caché sin cabeceras CORS y el canvas queda bloqueado.
+  const src = url.startsWith('data:') ? url : `${url}${url.includes('?') ? '&' : '?'}mtp-cors=1`;
   if (!imageCache.has(src)) {
     const p = new Promise((resolve, reject) => {
       const img = new Image();

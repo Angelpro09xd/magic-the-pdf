@@ -253,8 +253,3 @@ export function symbology() {
     .catch(() => new Map());
   return symbologyPromise;
 }
-
-/** URL de imagen pasada por el proxy del servidor (necesario para canvas y PDF). */
-export function proxied(url) {
-  return url ? `/api/image?url=${encodeURIComponent(url)}` : null;
-}

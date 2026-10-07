@@ -60,7 +60,19 @@ Las traducciones se guardan en caché en el servidor (`data/translations.json`).
 - **Página de calibración** con un rectángulo de 63 × 88 mm y una regla para comprobar la escala de la impresora.
 - **Elegir qué cartas imprimir** (todas, solo traducidas/editadas, solo oficiales o una a una).
 
-## Puesta en marcha
+## Versión web (GitHub Pages)
+
+La app funciona **sin servidor**: se publica sola en GitHub Pages con el workflow `.github/workflows/pages.yml`.
+
+- **Dirección**: `https://angelpro09xd.github.io/magic-the-pdf/`
+- **Activarlo (una sola vez)**: en el repositorio, *Settings → Pages → Build and deployment → Source: **GitHub Actions***. Después cada push a la rama principal (o *Actions → Publicar en GitHub Pages → Run workflow*) publica la web.
+- El workflow pasa los tests, genera `dist/` con `npm run build:pages` y **precalcula las memorias de traducción de los 10 idiomas** (`memory/<idioma>.json`), así el traductor funciona al instante en el navegador. Cada lunes se vuelven a generar para incluir las cartas oficiales nuevas.
+- En la versión web todo se hace desde el navegador: Scryfall, imágenes, EDHREC, Commander Spellbook, Google Translate y MyMemory permiten peticiones directas. Los mazos y las traducciones se guardan en el navegador (localStorage e IndexedDB).
+- **Diferencia con el servidor**: la importación desde URL (Archidekt, Moxfield…) solo funciona con el servidor, porque esas webs no permiten peticiones desde otras páginas. En la versión web, exporta la lista y pégala como texto. Claude (opcional) también requiere el servidor.
+
+Probar la versión estática en local: `npm run preview:pages`.
+
+## Puesta en marcha (con servidor, opcional)
 
 Requisitos: Node.js 20 o superior.
 
@@ -83,11 +95,12 @@ Tests: `npm test`.
 
 ## Arquitectura
 
-- `server/`: Express. Proxy de imágenes (para usarlas en `<canvas>` y en el PDF), EDHREC, Commander Spellbook, importadores por URL y el traductor:
-  - `server/lib/memory.js`: memoria de traducción aprendida de cartas oficiales.
-  - `server/lib/memoryStore.js`: descarga y guarda la memoria de cada idioma.
-  - `server/lib/machine.js`: traducción automática gratuita y correcciones de terminología.
-  - `server/lib/translate.js`: une todo (y Claude si hay clave).
+- `public/js/backend.js`: decide si hay servidor (`/api/…`) o si todo se hace desde el navegador (GitHub Pages).
+- `public/js/translator/`: el traductor (memoria, traducción automática, motor y almacén), común al servidor y al navegador.
+- `scripts/build-pages.js`: genera la web estática con las memorias precalculadas.
+- `server/`: Express (opcional). Proxy de imágenes (para usarlas en `<canvas>` y en el PDF), EDHREC, Commander Spellbook, importadores por URL y el traductor:
+  - `server/lib/memoryStore.js`: guarda en disco la memoria de cada idioma.
+  - `server/lib/translate.js`: añade Claude al motor si hay clave.
 - `public/`: frontend sin paso de compilación (módulos ES).
   - `js/scryfall.js`: cliente de Scryfall (respeta su límite de peticiones y agrupa búsquedas).
   - `js/deck.js`: lógica pura del mazo (parseo, validación, estadísticas), con tests.

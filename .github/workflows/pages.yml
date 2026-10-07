@@ -1,0 +1,62 @@
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main, claude/confident-heisenberg-1mo2uc]
+  workflow_dispatch:
+  schedule:
+    # Cada lunes: refresca las memorias de traducción con las cartas oficiales nuevas.
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Semana actual (para la caché de memorias)
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Caché de memorias de traducción
+        uses: actions/cache@v4
+        with:
+          path: .memory-cache
+          key: translation-memories-${{ steps.week.outputs.week }}
+
+      - name: Construir la web estática
+        run: node scripts/build-pages.js --memory-dir .memory-cache
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

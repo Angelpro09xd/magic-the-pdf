@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "build:pages": "node scripts/build-pages.js",
+    "preview:pages": "node scripts/build-pages.js --no-memories && npx --yes serve dist"
   },
   "engines": {
     "node": ">=20"

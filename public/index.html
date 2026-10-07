@@ -9,9 +9,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans+SC:wght@500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/styles.css">
-  <script src="/vendor/jspdf/jspdf.umd.min.js" defer></script>
-  <script type="module" src="/js/app.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="vendor/jspdf/jspdf.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -135,12 +135,15 @@
           </select>
           <button id="importTextBtn" class="btn primary" data-i18n="import">Importar</button>
         </div>
-        <h3 data-i18n="importUrl">Importar desde URL</h3>
-        <div class="row">
-          <input id="importUrl" type="url" placeholder="https://archidekt.com/decks/…">
-          <button id="importUrlBtn" class="btn" data-i18n="import">Importar</button>
+        <div class="server-only">
+          <h3 data-i18n="importUrl">Importar desde URL</h3>
+          <div class="row">
+            <input id="importUrl" type="url" placeholder="https://archidekt.com/decks/…">
+            <button id="importUrlBtn" class="btn" data-i18n="import">Importar</button>
+          </div>
+          <p class="muted small">Archidekt · Moxfield · MTGGoldfish · TappedOut</p>
         </div>
-        <p class="muted small">Archidekt · Moxfield · MTGGoldfish · TappedOut</p>
+        <p class="static-only muted small" data-i18n="importStatic"></p>
         <h3 data-i18n="export">Exportar</h3>
         <div class="button-wrap">
           <button class="btn" data-export="mtgo">MTGO / Moxfield</button>

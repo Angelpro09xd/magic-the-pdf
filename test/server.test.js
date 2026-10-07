@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { protectSymbols, restoreSymbols, cacheKey, createTranslator } from '../server/lib/translate.js';
-import { TranslationMemory, mask, unmask } from '../server/lib/memory.js';
-import { applyFixes } from '../server/lib/machine.js';
+import { protectSymbols, restoreSymbols, cacheKey, createServerTranslator as createTranslator } from '../server/lib/translate.js';
+import { TranslationMemory, mask, unmask } from '../public/js/translator/memory.js';
+import { applyFixes } from '../public/js/translator/machine.js';
 import { Cache } from '../server/lib/cache.js';
 import { createApp } from '../server/index.js';
 

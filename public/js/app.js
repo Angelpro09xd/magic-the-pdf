@@ -7,6 +7,7 @@ import {
   customCard, applyCustomFace,
 } from './deck.js';
 import { openEditor } from './editor.js';
+import * as backend from './backend.js';
 import { openArtPicker, pickByStyle } from './arts.js';
 import * as store from './storage.js';
 import { t, setUiLang, applyStaticTranslations } from './i18n.js';
@@ -40,17 +41,6 @@ function toast(message, type = '') {
   node.textContent = message;
   $('#toasts').append(node);
   setTimeout(() => node.remove(), type === 'error' ? 7000 : 3500);
-}
-
-async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
 }
 
 function setProgress(node, done, total, label) {
@@ -266,7 +256,7 @@ function applyTheme() {
 async function warmTranslator(lang) {
   if (lang === 'en') return loadAiStatus();
   try {
-    await api(`/api/memory/${lang}`, { method: 'POST' });
+    await backend.warm(lang);
   } catch {
     // Sin servidor: se verá en la píldora de estado.
   }
@@ -276,7 +266,7 @@ async function warmTranslator(lang) {
 let statusTimer = null;
 async function loadAiStatus() {
   try {
-    state.ai = await api('/api/status');
+    state.ai = await backend.getStatus();
   } catch {
     state.ai = { ai: false, offline: true };
   }
@@ -1038,8 +1028,7 @@ async function openCardModal(card, entry = findEntry(card)) {
 // ---------------------------------------------------------------- idioma y traducción
 
 async function translateApi(lang, faces) {
-  const res = await api('/api/translate', { method: 'POST', body: { lang, cards: faces } });
-  return res.translations;
+  return backend.translate(lang, faces);
 }
 
 async function runPrepare({ translate = true, retranslateMachine = false } = {}) {
@@ -1387,7 +1376,7 @@ async function loadEdhrec() {
   const out = $('#edhrecOut');
   out.innerHTML = '<span class="spinner"></span>';
   try {
-    state.edhrec = await api(`/api/edhrec/${edhrecSlug(cmds)}`);
+    state.edhrec = await backend.edhrec(edhrecSlug(cmds));
   } catch (err) {
     state.edhrec = null;
     out.innerHTML = `<p class="muted">${esc(t('edhrecError'))} (${esc(err.message)})</p>`;
@@ -1451,12 +1440,17 @@ async function loadCombos() {
   const out = $('#combosOut');
   out.innerHTML = '<span class="spinner"></span>';
   try {
-    state.combos = await api('/api/combos', {
-      method: 'POST',
-      body: { commanders: state.deck.commanders.map((e) => e.card.name), main: state.deck.cards.map((e) => e.card.name) },
-    });
+    state.combos = await backend.combos(
+      state.deck.commanders.map((e) => e.card.name),
+      state.deck.cards.map((e) => e.card.name),
+    );
   } catch (err) {
-    out.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
+    if (err.code === 'needs-server') {
+      // En GitHub Pages: copiamos la lista y abrimos el buscador de combos de Commander Spellbook.
+      out.innerHTML = `<div class="callout"><p>${esc(t('combosStatic'))}</p>
+        <a class="btn primary" href="https://commanderspellbook.com/find-my-combos/" target="_blank" rel="noopener">Commander Spellbook ↗</a></div>`;
+      navigator.clipboard?.writeText(exportDeckText(state.deck, 'plain')).then(() => toast(t('copied'), 'ok')).catch(() => {});
+    } else out.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     return;
   }
   renderCombos();
@@ -1566,10 +1560,10 @@ function bindIO() {
     if (!url) return;
     e.target.disabled = true;
     try {
-      const res = await api(`/api/import?url=${encodeURIComponent(url)}`);
+      const res = await backend.importUrl(url);
       await importText(res.text, $('#importMode').value, res.name);
     } catch (err) {
-      toast(err.message, 'error');
+      toast(err.code === 'needs-server' ? t('importStatic') : err.message, 'error');
     } finally {
       e.target.disabled = false;
     }
@@ -1846,7 +1840,10 @@ function init() {
   bindPdf();
   bindMisc();
   selectDeck(store.loadCurrentId());
-  warmTranslator(state.deck.lang);
+  backend.detectMode().then((mode) => {
+    document.body.classList.toggle('static-mode', mode === 'static');
+    warmTranslator(state.deck.lang);
+  });
   handleShareHash();
   window.addEventListener('hashchange', handleShareHash);
 }

@@ -5,9 +5,10 @@ import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { Cache } from './lib/cache.js';
 import { createThrottle, fetchBinary, fetchJson, HttpError } from './lib/http.js';
-import { createTranslator } from './lib/translate.js';
+import { createServerTranslator } from './lib/translate.js';
 import { createMemoryStore } from './lib/memoryStore.js';
-import { createMachineTranslator } from './lib/machine.js';
+import { createMachineTranslator } from '../public/js/translator/machine.js';
+import { EDHREC_URL, SPELLBOOK_URL, simplifyCombos, simplifyEdhrec, spellbookBody } from '../public/js/sources.js';
 import { importDeckFromUrl } from './lib/importers.js';
 import { getLanguage } from '../public/js/languages.js';
 
@@ -27,7 +28,7 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, m
   const apiCache = new Cache({ ttlMs: DAY, maxEntries: 2000 });
   const imageCache = new Cache({ ttlMs: DAY, maxEntries: 400 });
   const memoryStore = memories || createMemoryStore({ dir: cacheDir, scryfall });
-  const translator = createTranslator({
+  const translator = createServerTranslator({
     anthropic,
     model,
     effort,
@@ -62,6 +63,7 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, m
       ai: translator.hasAI,
       model: translator.hasAI ? model : null,
       translator: 'memory+machine',
+      mode: 'server',
       memories: await memoryStore.info(),
     })),
   );
@@ -108,23 +110,7 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, m
     route(async (req) => {
       const slug = String(req.params.slug).toLowerCase();
       if (!/^[a-z0-9-]+$/.test(slug)) throw new HttpError(400, 'Slug no válido');
-      return cached(`edhrec|${slug}`, async () => {
-        const d = await fetchJson(`https://json.edhrec.com/pages/commanders/${slug}.json`);
-        const lists = d?.container?.json_dict?.cardlists || [];
-        return {
-          numDecks: d?.container?.json_dict?.card?.num_decks ?? null,
-          lists: lists.map((l) => ({
-            header: l.header,
-            tag: l.tag,
-            cards: (l.cardviews || []).map((c) => ({
-              name: c.name,
-              synergy: c.synergy ?? null,
-              inclusion: c.potential_decks ? c.num_decks / c.potential_decks : null,
-              numDecks: c.num_decks ?? null,
-            })),
-          })),
-        };
-      });
+      return cached(`edhrec|${slug}`, async () => simplifyEdhrec(await fetchJson(EDHREC_URL(slug))));
     }),
   );
 
@@ -134,31 +120,8 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, m
     route(async (req) => {
       const { commanders = [], main = [] } = req.body || {};
       if (!Array.isArray(commanders) || !Array.isArray(main)) throw new HttpError(400, 'Formato no válido');
-      const body = {
-        commanders: commanders.slice(0, 4).map((card) => ({ card: String(card) })),
-        main: main.slice(0, 250).map((card) => ({ card: String(card) })),
-      };
-      const d = await fetchJson('https://backend.commanderspellbook.com/find-my-combos', {
-        method: 'POST',
-        body,
-        timeoutMs: 30000,
-      });
-      const simplify = (v) => ({
-        id: v.id,
-        cards: (v.uses || []).map((u) => u.card.name),
-        produces: (v.produces || []).map((p) => p.feature.name),
-        description: v.description,
-        prerequisites: v.easyPrerequisites || v.notablePrerequisites || '',
-        manaNeeded: v.manaNeeded || '',
-        identity: v.identity,
-        bracketTag: v.bracketTag,
-        url: `https://commanderspellbook.com/combo/${v.id}/`,
-      });
-      const r = d.results || {};
-      return {
-        included: (r.included || []).slice(0, 60).map(simplify),
-        almostIncluded: (r.almostIncluded || []).slice(0, 60).map(simplify),
-      };
+      const d = await fetchJson(SPELLBOOK_URL, { method: 'POST', body: spellbookBody(commanders, main), timeoutMs: 30000 });
+      return simplifyCombos(d);
     }),
   );
 

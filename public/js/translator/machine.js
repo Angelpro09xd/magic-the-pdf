@@ -41,7 +41,8 @@ export function applyFixes(text, lang) {
 async function google(texts, language) {
   const params = new URLSearchParams({ client: 'gtx', sl: 'en', tl: language.gt, dt: 't', q: texts.join('\n') });
   const res = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`, {
-    headers: { 'User-Agent': UA },
+    // En el navegador no se puede (ni hace falta) fijar el User-Agent: provocaría una petición CORS previa.
+    headers: typeof window === 'undefined' ? { 'User-Agent': UA } : {},
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error(`Google Translate respondió ${res.status}`);
