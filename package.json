@@ -1,0 +1,22 @@
+{
+  "name": "magic-the-pdf",
+  "version": "1.0.0",
+  "description": "Constructor de mazos Commander de Magic: The Gathering con exportación a PDF para proxies, selección de idioma y traducción por IA.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "dotenv": "^18.0.6",
+    "express": "^5.2.1",
+    "jspdf": "^4.2.1"
+  }
+}
