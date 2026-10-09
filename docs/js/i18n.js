@@ -980,6 +980,11 @@ export function setUiLang(lang) {
 
 export const getUiLang = () => current;
 
+/** Añade textos de otro módulo (p. ej. la IA de mazos). */
+export function addStrings(lang, strings) {
+  Object.assign((STRINGS[lang] ||= {}), strings);
+}
+
 export function t(key, params = {}) {
   const s = STRINGS[current][key] ?? STRINGS.es[key] ?? key;
   return s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? params[k] : m));

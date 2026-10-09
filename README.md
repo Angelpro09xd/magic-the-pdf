@@ -37,6 +37,18 @@ Las traducciones se guardan en caché en el servidor (`data/translations.json`).
 - Vista previa en vivo tal como se imprimirá, y descarga en **PNG**.
 - **Cartas personalizadas** desde cero (✨ en la pestaña Buscar), que se añaden al mazo y se imprimen como las demás.
 
+### IA de mazos 🤖
+
+Pestaña **🤖 IA** con un asistente propio (funciona también en GitHub Pages, sin claves):
+
+- **Modelo entrenado por la app** (`scripts/train-roles.js` → `public/ai/roles-model.json`, 580 KB): una regresión logística por función sobre el texto de reglas, entrenada con las etiquetas de [Scryfall Tagger](https://tagger.scryfall.com) de 22.317 cartas legales en Commander. Reconoce 23 funciones (ramp, robo, removal, barridos, contrahechizos, tutores, recursión, protección, sacrificio, turnos extra…) con un F1 de entre el 81 % y el 100 % en validación.
+- **Análisis del mazo**: nota de 0 a 100 (A-F), veredicto, bracket estimado, estrategia detectada (fichas, aristócratas, cementerio, tribal…), tierras recomendadas según la curva y el ramp, funciones básicas frente a lo habitual, curva, fuentes de cada color, sinergia con el comandante (EDHREC), cartas clave y cartas más flojas.
+- **Cambios propuestos** que se **aceptan o rechazan** uno a uno (o todos), con deshacer: quitar lo ilegal, ajustar tierras, cubrir lo que falta, completar/recortar a 100, bajar la curva, arreglar colores y mejoras claras. Las rechazadas no se vuelven a proponer.
+- **Construir con IA** un mazo completo para el comandante (presupuesto por carta y bracket objetivo) y **completar hasta 100**.
+- **Chat**: «¿está bien mi mazo?», «añade más ramp», «pon 4 de robo», «¿qué corto?», «hazlo más barato», «cambia lo que cueste más de 5 €», «bracket 2», «hazlo más fuerte», «¿cómo se juega?», «¿es buena Sol Ring?», «construye un mazo de Atraxa»…
+- **IA en línea gratuita (opcional)**: [Pollinations](https://pollinations.ai), sin clave, solo para redactar explicaciones a partir de los datos que calcula la IA propia (con servidor y clave de Anthropic se usa Claude).
+- **En el editor**: mejorar la carta automáticamente (traducir, estilo «como la original» sobre la mejor impresión), revisar la traducción (símbolos, números, párrafos, palabras en inglés) y corregirla, elegir la mejor impresión, generar ambientación y pulir la redacción.
+
 ### Herramientas
 - **Sugerencias de EDHREC** para tu comandante (% de inclusión y sinergia), añadiendo con un clic.
 - **Combos** de Commander Spellbook: los que ya tiene el mazo y los que están a una carta.
@@ -111,6 +123,8 @@ Tests: `npm test`.
   - `js/pdf.js`: compone el PDF con jsPDF.
   - `js/editor.js`: editor completo de cartas.
   - `js/arts.js`: selector de artes.
+  - `js/ai/`: IA de mazos: `features.js` y `roles.js` (modelo de funciones), `brain.js` (análisis, propuestas y constructor, con tests), `assistant.js` (entiende las peticiones del chat), `sources.js` (EDHREC y Scryfall), `llm.js` (IA en línea gratuita), `cardAi.js` (IA del editor) y `panel.js` (pestaña IA).
+- `scripts/train-roles.js`: entrena el modelo de funciones de carta.
 
 ## APIs utilizadas
 
@@ -124,6 +138,8 @@ Tests: `npm test`.
 | [Claude (Anthropic)](https://docs.anthropic.com) | Opcional, si hay clave |
 | [EDHREC](https://edhrec.com) | Recomendaciones por comandante |
 | [Commander Spellbook](https://commanderspellbook.com) | Combos |
+| [Scryfall Tagger](https://tagger.scryfall.com) (`otag:`) | Datos de entrenamiento de la IA y cartas candidatas por función |
+| [Pollinations](https://pollinations.ai) | IA de texto gratuita y opcional para redactar |
 | Archidekt, Moxfield, MTGGoldfish, TappedOut | Importación de mazos |
 
 ## Aviso legal

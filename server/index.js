@@ -152,6 +152,31 @@ export function createApp({ anthropic, model, effort, mymemoryEmail, cacheDir, m
     }),
   );
 
+  // Redacción con IA para el asistente de mazos: Claude si hay clave; si no, Pollinations (gratis).
+  app.post(
+    '/api/llm',
+    route(async (req) => {
+      const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+      if (!messages.length || messages.length > 8) throw new HttpError(400, 'Mensajes no válidos');
+      const clean = messages.map((m) => ({ role: ['system', 'user', 'assistant'].includes(m.role) ? m.role : 'user', content: String(m.content || '').slice(0, 8000) }));
+      if (anthropic) {
+        const response = await anthropic.beta.messages.create({
+          model,
+          max_tokens: 1500,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          output_config: { effort: 'low' },
+          system: clean.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n') || undefined,
+          messages: clean.filter((m) => m.role !== 'system'),
+        });
+        const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+        return { text, source: 'claude' };
+      }
+      const d = await fetchJson('https://text.pollinations.ai/openai', { method: 'POST', body: { model: 'openai', messages: clean, private: true, referrer: 'magic-the-pdf' }, timeoutMs: 40000 });
+      return { text: String(d?.choices?.[0]?.message?.content || '').trim(), source: 'pollinations' };
+    }),
+  );
+
   app.use(
     '/vendor/jspdf',
     express.static(path.join(root, 'node_modules/jspdf/dist'), { maxAge: '7d' }),

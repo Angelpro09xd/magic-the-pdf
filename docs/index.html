@@ -165,6 +165,7 @@
       <div id="deckHeader" class="deck-header"></div>
       <nav class="tabs" data-group="right" role="tablist">
         <button class="tab active" data-tab="deck" data-i18n="tabDeck">Mazo</button>
+        <button class="tab" data-tab="ai" data-i18n="tabAi">🤖 IA</button>
         <button class="tab" data-tab="lang" data-i18n="tabLang">Idioma y traducción</button>
         <button class="tab" data-tab="stats" data-i18n="tabStats">Análisis</button>
         <button class="tab" data-tab="hand" data-i18n="tabHand">Mano de prueba</button>
@@ -210,6 +211,10 @@
         <label class="notes-label"><span data-i18n="notes">Notas del mazo</span>
           <textarea id="deckNotes" rows="3"></textarea>
         </label>
+      </div>
+
+      <div class="tab-panel" data-panel="ai">
+        <div id="aiPanel" class="ai-panel"></div>
       </div>
 
       <div class="tab-panel" data-panel="lang">

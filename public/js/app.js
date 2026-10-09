@@ -15,6 +15,7 @@ import * as store from './storage.js';
 import { t, setUiLang, applyStaticTranslations } from './i18n.js';
 import { langStatus, officialPrint, displayName, prepareEntries, renderEntry, targetLang, faceKey } from './resolve.js';
 import { buildPdf, entriesToPrint, DEFAULT_PDF_SETTINGS, PAPERS } from './pdf.js';
+import { initAiPanel, onAiTabShown } from './ai/panel.js';
 
 // ---------------------------------------------------------------- utilidades
 
@@ -267,6 +268,7 @@ function bindHeader() {
     setUiLang(ui.value);
     saveSettingsNow();
     applyStaticTranslations();
+    setupAiPanel();
     renderAll();
     renderAiStatus();
   });
@@ -359,6 +361,7 @@ function onTabShown(tab) {
   if (tab === 'lang') renderLangTab();
   if (tab === 'pdf') renderPdfSummary();
   if (tab === 'hand' && !state.hand.hand.length) newHand();
+  if (tab === 'ai') onAiTabShown();
 }
 
 // ---------------------------------------------------------------- añadir / quitar cartas
@@ -429,6 +432,59 @@ function changeQty(entry, delta) {
   entry.qty = next;
   saveDeck();
   renderDeckPanels();
+}
+
+/**
+ * Aplica cambios propuestos por la IA: [{ add?: card, qty?, cut?: card }]. Un solo paso de deshacer.
+ */
+function applyChanges(changes) {
+  const deck = state.deck;
+  let applied = 0;
+  for (const { add, qty = 1, cut } of changes) {
+    if (cut) {
+      const e = deck.cards.find((x) => x.card?.name === cut.name);
+      if (e) {
+        e.qty -= 1;
+        if (e.qty <= 0) deck.cards = deck.cards.filter((x) => x !== e);
+        applied++;
+      }
+    }
+    if (add) {
+      const e = deck.cards.find((x) => x.card?.oracle_id === add.oracle_id);
+      if (e) {
+        if (e.qty + qty <= maxCopiesAllowed(add)) e.qty += qty;
+      } else if (!deck.commanders.some((x) => x.card?.oracle_id === add.oracle_id)) deck.cards.push(store.newEntry(add, qty));
+      applied++;
+    }
+  }
+  if (!applied) return;
+  if (changes.length === 1) {
+    const c = changes[0];
+    toast(c.add && c.cut ? `${c.cut.name} → ${c.add.name}` : c.add ? t('added', { name: c.add.name }) : `− ${c.cut.name}`, 'ok');
+  }
+  saveDeck();
+  renderDeckPanels();
+}
+
+/** Sustituye (o completa) el mazo con las cartas que construyó la IA. */
+function replaceCards(cards, replace = true) {
+  if (replace) state.deck.cards = [];
+  applyChanges(cards.map((e) => ({ add: e.card, qty: e.qty })));
+  renderAll();
+}
+
+function setupAiPanel() {
+  initAiPanel($('#aiPanel'), {
+    getDeck: () => state.deck,
+    applyChanges,
+    replaceCards,
+    setCommander,
+    openCardModal: (card) => openCardModal(card),
+    toast,
+    settings,
+    saveSettings: saveSettingsNow,
+    getCombos: () => state.combos,
+  });
 }
 
 function demoteCommander(entry) {
@@ -566,12 +622,14 @@ function renderDeckHeader() {
         <span>$${stats.usd.toFixed(2)} · €${stats.eur.toFixed(2)}</span>
         <span>${esc(t('avgCmc'))}: ${stats.avgCmc.toFixed(2)}</span>
         ${deck.lang !== 'en' && allEntries().length ? `<button class="btn small primary" data-act="reviewAll">${esc(t('translateAllReview'))}</button>` : ''}
+        ${deck.commanders.length ? `<button class="btn small" data-act="openAi">${esc(t('tabAi'))}</button>` : ''}
       </div>
     </div>`;
   $$('#deckHeader img[data-uid]').forEach((img) =>
     img.addEventListener('click', () => openEntryModal(deck.commanders.find((e) => e.uid === img.dataset.uid))),
   );
   $('#deckHeader [data-act="reviewAll"]')?.addEventListener('click', openTranslationReview);
+  $('#deckHeader [data-act="openAi"]')?.addEventListener('click', () => showTab('ai'));
 }
 
 function issueText(issue) {
@@ -1909,6 +1967,7 @@ function init() {
   bindIO();
   bindPdf();
   bindMisc();
+  setupAiPanel();
   initFonts().catch(() => {});
   selectDeck(store.loadCurrentId());
   backend.detectMode().then((mode) => {

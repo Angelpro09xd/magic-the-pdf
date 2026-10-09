@@ -13,6 +13,8 @@ import { FRAME_KEYS, CARD_W, CARD_H } from './render.js';
 import { forgetAnalysis } from './original.js';
 import { TITLE_FONTS, RULES_FONTS, CUSTOM_TITLE, CUSTOM_RULES, currentFonts, chooseFonts, uploadFont } from './fonts.js';
 import { openArtPicker } from './arts.js';
+import { checkTranslation, generateFlavor, polishRules } from './ai/cardAi.js';
+import './ai/strings.js';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -133,6 +135,17 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
             </div>`
           }
           ${card.custom ? `<div class="row"><select data-k="tlang">${languageOptions(targetLang(entry, deck), { printed: t('langGroupPrinted'), translated: t('langGroupTranslated') })}</select><button type="button" class="btn" data-a="translate">🌐 ${esc(t('translateCustom'))}</button></div>` : ''}
+        </fieldset>
+        <fieldset class="ed-ai">
+          <legend>${esc(t('edAiTitle'))}</legend>
+          <div class="row wrap">
+            <button type="button" class="btn primary" data-a="aiAuto">${esc(t('edAiAuto'))}</button>
+            <button type="button" class="btn" data-a="aiCheck">${esc(t('edAiCheck'))}</button>
+            ${card.custom ? '' : `<button type="button" class="btn" data-a="aiBestPrint">${esc(t('edAiBestPrint'))}</button>`}
+            <button type="button" class="btn" data-a="aiFlavor">${esc(t('edAiFlavor'))}</button>
+            ${card.custom ? '' : `<button type="button" class="btn" data-a="aiPolish">${esc(t('edAiPolish'))}</button>`}
+          </div>
+          <div class="ed-ai-out small"></div>
         </fieldset>
         <fieldset>
           <legend>${esc(t('edStyle'))}</legend>
@@ -435,6 +448,144 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
     if (e.target.dataset?.k) lastField = e.target;
   });
 
+  // ------------------------------------------------------------ IA de la carta
+  const aiOut = (html) => {
+    body.querySelector('.ed-ai-out').innerHTML = html;
+  };
+  const langOf = () => field('tlang')?.value || targetLang(entry, deck);
+  const issuesOf = (lang) =>
+    card.custom ? [] : englishFaces(card).flatMap((f, i) => checkTranslation(f, draft.faces[i] || {}, lang).map((x) => ({ ...x, face: i })));
+  const issuesHtml = (issues) =>
+    issues.length
+      ? `<p>⚠️ ${esc(t('edAiIssues'))}</p><ul>${issues.map((x) => `<li>${esc(t(x.code, x.params))}</li>`).join('')}</ul>`
+      : `<p>✅ ${esc(t('edAiCheckOk'))}</p>`;
+
+  async function bestPrint() {
+    const bases = await sf.findOverlayBases([card]).catch(() => new Map());
+    const base = bases.get(card.oracle_id);
+    if (!base) return null;
+    draft.basePrint = base;
+    overlayBase = base;
+    draft.style = 'overlay';
+    draft.layouts = [];
+    draft.colors = [];
+    fillForm();
+    schedulePreview(0);
+    return base;
+  }
+
+  async function runCardAi(action, btn) {
+    const lang = langOf();
+    const old = btn?.textContent;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = `⏳ ${t('edAiWorking')}`;
+    }
+    try {
+      if (action === 'aiCheck') {
+        const issues = issuesOf(lang);
+        aiOut(`${issuesHtml(issues)}${issues.length && !card.custom ? `<button type="button" class="btn small primary" data-a="aiFix">🛠 ${esc(t('translateCard'))}</button>` : ''}`);
+      } else if (action === 'aiFix') {
+        await doTranslate(lang);
+        const issues = issuesOf(lang);
+        aiOut(`<p>${esc(t('edAiFixed'))}</p>${issuesHtml(issues)}`);
+      } else if (action === 'aiBestPrint') {
+        const base = await bestPrint();
+        if (!base) toast(t('noOverlayBase'), 'error');
+        else aiOut(`<p>✅ ${esc(t('edAiPrintDone', { set: `${base.set_name} (${base.set.toUpperCase()} #${base.collector_number})`, frame: base.frame }))}</p>`);
+      } else if (action === 'aiAuto') {
+        const steps = [];
+        // 1) Traducir si sigue en inglés (o si la revisión encuentra fallos)
+        const english = englishFaces(card);
+        const untranslated = !card.custom && lang !== 'en' && draft.faces.some((f, i) => f.oracle_text === english[i]?.oracle_text && f.oracle_text);
+        if (!card.custom && lang !== 'en' && (untranslated || issuesOf(lang).length)) {
+          await doTranslate(lang);
+          steps.push(t('edAiStepTranslated'));
+        }
+        // 2) Estilo «como la original» sobre una impresión de marco moderno si la actual es difícil
+        if (!card.custom) {
+          const info = lastCanvases[faceIdx]?.mtpInfo;
+          const hard = !overlayBase || ['1993', '1997'].includes(overlayBase.frame) || overlayBase.full_art || (info && info.confidence < 0.6);
+          if (draft.style !== 'overlay' || hard) {
+            if (hard ? await bestPrint() : await ensureOverlayBase()) {
+              if (draft.style !== 'overlay') {
+                draft.style = 'overlay';
+                fillForm();
+                schedulePreview(0);
+              }
+              steps.push(t(hard ? 'edAiStepPrint' : 'edAiStepStyle'));
+            }
+          }
+        }
+        const issues = issuesOf(lang);
+        aiOut(`<p>✨ ${esc(t('edAiAutoDone', { steps: steps.join(', ') || t('edAiStepNothing') }))}</p>${card.custom ? '' : issuesHtml(issues)}`);
+      } else if (action === 'aiFlavor') {
+        try {
+          face().flavor_text = await generateFlavor(face(), lang);
+          fillForm();
+          schedulePreview();
+          aiOut(`<p>🪶 ${esc(face().flavor_text)}</p><p class="tiny muted">${esc(t('aiOnlineBadge'))}</p>`);
+        } catch {
+          toast(t('edAiFlavorFail'), 'error');
+        }
+      } else if (action === 'aiPolish') {
+        try {
+          const original = englishFaces(card)[faceIdx];
+          face().oracle_text = await polishRules(original, face(), lang);
+          fillForm();
+          schedulePreview();
+          aiOut(`<p>✅ ${esc(t('edAiPolish'))}</p>${issuesHtml(issuesOf(lang))}<p class="tiny muted">${esc(t('aiOnlineBadge'))}</p>`);
+        } catch {
+          toast(t('edAiFlavorFail'), 'error');
+        }
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    }
+  }
+
+  /** Traduce la carta (o la personalizada) al idioma indicado. */
+  async function doTranslate(lang, btn) {
+    if (btn) btn.disabled = true;
+    const old = btn?.textContent;
+    if (btn) btn.textContent = `⏳ ${t('translating')}`;
+    try {
+      // Las cartas reales se traducen desde el inglés oficial; las personalizadas, desde lo escrito.
+      const source = card.custom ? draft.faces : englishFaces(card);
+      const faces = source.map((f, i) => ({
+        key: `${faceKey(card, i)}:${lang}:${f.oracle_text.length}:${(f.flavor_text || '').length}:${f.name}`,
+        name: f.name,
+        mana_cost: draft.faces[i].mana_cost,
+        type_line: f.type_line,
+        oracle_text: f.oracle_text,
+        flavor_text: f.flavor_text || '',
+      }));
+      const out = await translateFn(lang, faces);
+      out.forEach((r, i) => {
+        if (r.source === 'untranslated') throw new Error(r.error || t('translateFailed'));
+        Object.assign(draft.faces[i], {
+          name: r.name,
+          type_line: r.type_line,
+          oracle_text: r.oracle_text,
+          flavor_text: r.flavor_text ?? draft.faces[i].flavor_text,
+        });
+      });
+      fillForm();
+      schedulePreview();
+      return true;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    }
+  }
+
   body.onclick = async (e) => {
     const symBtn = e.target.closest('[data-sym]');
     if (symBtn) return insertSymbol(symBtn.dataset.sym);
@@ -493,40 +644,14 @@ export function openEditor({ entry, deck, translateFn, onSave, onRemove, toast =
       schedulePreview();
     } else if (a === 'translate') {
       const lang = field('tlang').value;
-      const btn = e.target.closest('button');
-      btn.disabled = true;
-      const old = btn.textContent;
-      btn.textContent = `⏳ ${t('translating')}`;
       try {
-        // Las cartas reales se traducen desde el inglés oficial; las personalizadas, desde lo escrito.
-        const source = card.custom ? draft.faces : englishFaces(card);
-        const faces = source.map((f, i) => ({
-          key: `${faceKey(card, i)}:${lang}:${f.oracle_text.length}:${(f.flavor_text || '').length}:${f.name}`,
-          name: f.name,
-          mana_cost: draft.faces[i].mana_cost,
-          type_line: f.type_line,
-          oracle_text: f.oracle_text,
-          flavor_text: f.flavor_text || '',
-        }));
-        const out = await translateFn(lang, faces);
-        out.forEach((r, i) => {
-          if (r.source === 'untranslated') throw new Error(r.error || t('translateFailed'));
-          Object.assign(draft.faces[i], {
-            name: r.name,
-            type_line: r.type_line,
-            oracle_text: r.oracle_text,
-            flavor_text: r.flavor_text ?? draft.faces[i].flavor_text,
-          });
-        });
-        fillForm();
-        schedulePreview();
+        await doTranslate(lang, e.target.closest('button'));
         toast(t('translatedTo', { lang: getLanguage(lang).name }), 'ok');
       } catch (err) {
         toast(err.message, 'error');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = old;
       }
+    } else if (a.startsWith('ai')) {
+      await runCardAi(a, e.target.closest('button'));
     } else if (a === 'pickArt') {
       openArtPicker({
         card,
